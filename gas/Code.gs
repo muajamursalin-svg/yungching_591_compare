@@ -139,6 +139,15 @@ function doPost(e) {
         }
 
         if (platform && shopId) {
+          // 0. 檢查永慶分店庫存是否正在每六小時刷新中 (鎖定狀態)
+          const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
+          if (syncLock && syncLock.is_locked) {
+            replyLineMessage(lineToken, replyToken,
+              `⚠️ 目前刷新分店庫存中 請五分鐘後再查詢`
+            );
+            continue;
+          }
+
           // 1. 檢查 1 分鐘內快取 (若距上次查詢小於 60 秒，直接秒回報告)
           const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
 
@@ -196,6 +205,70 @@ function doPost(e) {
     console.error("doPost Error: " + err.toString());
     return ContentService.createTextOutput("Error: " + err.toString());
   }
+}
+
+/**
+ * 檢查 Turso system_locks 中永慶分店庫存是否正在刷新中
+ */
+function checkBranchSyncLock(tursoUrl, tursoToken) {
+  if (!tursoUrl || !tursoToken) return null;
+
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const sql = "SELECT lock_key, is_locked, locked_at, message FROM system_locks WHERE lock_key = 'branch_sync' LIMIT 1;";
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: { sql: sql, args: [] }
+        },
+        { type: "close" }
+      ]
+    };
+
+    const res = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: {
+        "Authorization": "Bearer " + tursoToken,
+        "Content-Type": "application/json"
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() !== 200) return null;
+
+    const data = JSON.parse(res.getContentText());
+    const result = data.results[0]?.response?.result;
+    if (!result || !result.rows || result.rows.length === 0) return null;
+
+    const cols = result.cols.map(c => c.name);
+    const row = result.rows[0];
+    const lockObj = {};
+    cols.forEach((col, idx) => {
+      lockObj[col] = row[idx].value;
+    });
+
+    if (parseInt(lockObj.is_locked) === 1) {
+      // 檢查是否超過 15 分鐘 (900秒)，避免異常中斷產生的死鎖
+      if (lockObj.locked_at) {
+        const lockedTime = new Date(lockObj.locked_at.replace(" ", "T") + "+08:00").getTime();
+        const now = new Date().getTime();
+        const diffSec = (now - lockedTime) / 1000;
+        if (diffSec > 900) {
+          console.warn("Sync lock expired (>15m), ignoring.");
+          return null;
+        }
+      }
+      return {
+        is_locked: true,
+        message: lockObj.message || "目前刷新分店庫存中 請五分鐘後再查詢"
+      };
+    }
+  } catch (err) {
+    console.warn("checkBranchSyncLock failed: " + err);
+  }
+  return null;
 }
 
 /**

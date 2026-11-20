@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS yungching_houses (
 CREATE INDEX IF NOT EXISTS idx_yc_search ON yungching_houses (county, district, community_name, reg_area);
 CREATE INDEX IF NOT EXISTS idx_yc_branch ON yungching_houses (branch_id);
 
+-- 系統狀態與鎖定表 (防止同步分店庫存與查詢衝突)
+CREATE TABLE IF NOT EXISTS system_locks (
+    lock_key TEXT PRIMARY KEY,
+    is_locked INTEGER DEFAULT 0,
+    locked_at TEXT,
+    updated_at TEXT,
+    message TEXT
+);
+
 -- 591 店鋪表
 CREATE TABLE IF NOT EXISTS t591_shops (
     shop_id TEXT PRIMARY KEY,

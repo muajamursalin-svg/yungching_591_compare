@@ -42,6 +42,31 @@ class InventoryComparator:
     def __init__(self, db_client: Optional[TursoClient] = None):
         self.db = db_client or TursoClient()
 
+    def check_branch_sync_lock(self, timeout_minutes: int = 15) -> Optional[Dict[str, Any]]:
+        """
+        檢查系統是否正處於分店庫存刷新鎖定中
+        若鎖定超過 timeout_minutes (預設 15 分鐘)，視為超時鎖失效，避免死鎖
+        """
+        try:
+            rows = self.db.execute("SELECT * FROM system_locks WHERE lock_key = 'branch_sync' LIMIT 1;")
+            if not rows:
+                return None
+            lock = rows[0]
+            if int(lock.get("is_locked") or 0) == 1:
+                locked_at_str = lock.get("locked_at")
+                if locked_at_str:
+                    try:
+                        locked_time = datetime.strptime(locked_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TAIWAN_TZ)
+                        if (get_tw_now() - locked_time).total_seconds() > timeout_minutes * 60:
+                            print(f"[Warn] 偵測到超時的同步鎖 ({locked_at_str})，已自動忽略。")
+                            return None
+                    except Exception:
+                        pass
+                return lock
+        except Exception as e:
+            print(f"[Warn] 查詢系統鎖定狀態失敗: {e}")
+        return None
+
     def check_recent_cache(self, shop_id: str, platform: str = "", user_id: str = "", max_seconds: int = 60) -> Optional[Dict[str, Any]]:
         """
         檢查 1 分鐘 (60 秒) 內是否已有該店鋪的比對報告，若有則直接回傳快取結果

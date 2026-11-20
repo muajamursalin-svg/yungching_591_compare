@@ -27,6 +27,50 @@ class YungchingBranchSyncer:
     def __init__(self, db_client: TursoClient):
         self.db = db_client
 
+    def acquire_sync_lock(self):
+        """啟動分店同步鎖定 (防併發查詢，通知使用者正在刷新庫存)"""
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_locks (
+                lock_key TEXT PRIMARY KEY,
+                is_locked INTEGER DEFAULT 0,
+                locked_at TEXT,
+                updated_at TEXT,
+                message TEXT
+            );
+            """
+        )
+        self.db.execute(
+            """
+            INSERT INTO system_locks (lock_key, is_locked, locked_at, updated_at, message)
+            VALUES ('branch_sync', 1, ?, ?, '目前刷新分店庫存中 請五分鐘後再查詢')
+            ON CONFLICT(lock_key) DO UPDATE SET
+                is_locked = 1,
+                locked_at = excluded.locked_at,
+                updated_at = excluded.updated_at,
+                message = excluded.message;
+            """,
+            [now_str, now_str]
+        )
+        print(f"🔒 [Lock] 已啟動系統維護鎖定 (is_locked=1) @ {now_str}")
+
+    def release_sync_lock(self):
+        """解除分店同步鎖定"""
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            self.db.execute(
+                """
+                UPDATE system_locks 
+                SET is_locked = 0, updated_at = ? 
+                WHERE lock_key = 'branch_sync';
+                """,
+                [now_str]
+            )
+            print(f"🔓 [Lock] 已解除系統鎖定 (is_locked=0) @ {now_str}")
+        except Exception as e:
+            print(f"[Error] 解除系統鎖定失敗: {e}")
+
     def fetch_shop_info(self, branch_id: str) -> dict:
         url = f"{self.BASE_DOMAIN}/api/v1/shop/base"
         try:
@@ -227,14 +271,8 @@ class YungchingBranchSyncer:
         if batch_stmts:
             self.db.batch(batch_stmts)
 
-        # 3. 清理已下架物件（如果原本在庫但本次已不在 active_sids 中）
-        if active_sids:
-            # 刪除已下架物件
-            placeholders = ",".join(["?"] * len(active_sids))
-            clean_sql = f"DELETE FROM yungching_houses WHERE branch_id = ? AND case_sid NOT IN ({placeholders});"
-            self.db.execute(clean_sql, [branch_id] + active_sids)
-
         print(f"✅ 分店 {branch_id} 同步完成！在庫物件數量: {len(active_sids)}")
+        return len(active_sids)
 
     def run(self, branches_file="branches.json"):
         cfg_path = os.path.join(os.path.dirname(__file__), branches_file)
@@ -247,8 +285,25 @@ class YungchingBranchSyncer:
         enabled_branches = [b for b in branches if b.get("enabled", True)]
         print(f"載入 {len(branches)} 家分店設定，其中 {len(enabled_branches)} 家啟用同步...")
 
-        for b in enabled_branches:
-            self.sync_branch(b)
+        # 1. 啟動系統同步鎖定 (防併發比對查詢)
+        self.acquire_sync_lock()
+
+        try:
+            # 2. 清空既有分店庫存總表，徹底根除下架/過期舊資料殘留問題
+            print("🧹 清空舊有永慶分店庫存 (DELETE FROM yungching_houses)...")
+            self.db.execute("DELETE FROM yungching_houses;")
+            print("✅ 舊有庫存已清空，開始向各分店拉取最新在庫資料並填入...")
+
+            total_synced_count = 0
+            for b in enabled_branches:
+                count = self.sync_branch(b)
+                total_synced_count += (count or 0)
+
+            print(f"\n🎉 所有分店同步作業完成！目前永慶分店在庫總物件數: {total_synced_count}")
+
+        finally:
+            # 3. 確保無論成功或發生例外，必定解除鎖定
+            self.release_sync_lock()
 
 if __name__ == "__main__":
     db = TursoClient()

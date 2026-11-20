@@ -102,6 +102,14 @@ def main():
     db = TursoClient()
     comparator = InventoryComparator(db)
 
+    # 0. 檢查永慶分店庫存是否正在每六小時刷新鎖定中
+    sync_lock = comparator.check_branch_sync_lock()
+    if sync_lock:
+        lock_msg = sync_lock.get("message") or "目前刷新分店庫存中 請五分鐘後再查詢"
+        print(f"[Notice] 系統正在刷新永慶分店庫存中，暫停比對任務: {lock_msg}")
+        send_line_push_notification(user_id, f"⚠️ {lock_msg}")
+        return
+
     # 1. 根據平台萃取店鋪 ID / 帳號
     if platform == "5168":
         crawler_5168 = HousePrice5168Crawler(db)
