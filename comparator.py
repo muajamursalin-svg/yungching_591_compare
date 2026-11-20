@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from turso_client import TursoClient
+from geo_utils import is_road_too_far
 
 # 統一使用台灣時區 (UTC+8)
 TAIWAN_TZ = timezone(timedelta(hours=8))
@@ -80,7 +81,7 @@ class InventoryComparator:
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
-        # 1. 第一階段：硬性特徵比對 (縣市、行政區、樓層、建坪、屋齡)
+        # 1. 第一階段：硬性特徵比對 (縣市、行政區、樓層、總樓高、建坪、屋齡、路網距離)
         candidates = []
         for y in yc_list:
             c2 = (y.get("county") or "").strip()
@@ -89,24 +90,48 @@ class InventoryComparator:
                 continue
 
             f2 = int(y.get("from_floor") or 0)
-            # 樓層比對 (大樓/公寓嚴格一致；透天/整棟相容 99 與 1)
-            if f1 > 0 and f2 > 0 and f1 != 99:
+            to_f2 = int(y.get("to_floor") or 0)
+            up_f2 = int(y.get("up_floor") or 0)
+
+            # 樓層比對 (大樓公寓嚴格一致；透天整棟相容 99、1、-1 地下車庫別墅、0 或 to_floor == up_floor)
+            if f1 > 0 and f1 != 99:
                 if f1 != f2:
                     continue
-            elif f1 == 99 and f2 != 99 and f2 != 1:
-                continue
+            elif f1 == 99:
+                if f2 not in [-1, 0, 1, 99] and to_f2 != up_f2:
+                    continue
 
+            # 總樓高比對 (硬性門檻：只能正負 1 樓差距，落差太大判定不同社區)
+            if allf1 > 0 and up_f2 > 0:
+                if abs(allf1 - up_f2) > 1:
+                    continue
+
+            # 建物登記坪數 (容許誤差 <= 1.5 坪)
             a2 = float(y.get("reg_area") or 0.0)
             diff_area = abs(a1 - a2)
             if diff_area > 1.5:
                 continue
 
-            # 屋齡比對：雙方皆有屋齡時，容許誤差 <= 2.5 年 (排除差了幾十年的不同物件)
+            # 屋齡比對：雙方皆有屋齡時，容許誤差 <= 2.5 年 (排除差了幾十年的老屋新屋誤配)
             age2 = float(y.get("build_age") or 0.0)
             if age1 > 0 and age2 > 0:
                 diff_age = abs(age1 - age2)
                 if diff_age > 2.5:
                     continue
+
+            # 社區名稱吻合度檢查
+            comm2 = clean_text(y.get("community_name") or "")
+            case2 = clean_text(y.get("case_name") or "")
+            addr2 = (y.get("address") or "").strip()
+            comm_match = False
+            if comm1 and comm2 and (comm1 in comm2 or comm2 in comm1):
+                comm_match = True
+            elif comm2 and comm2 in t1:
+                comm_match = True
+
+            # 道路經緯度距離定位檢核：若無社區吻合，且兩條路實際相距超過 800 公尺 -> 判定不同物件！
+            if not comm_match and is_road_too_far(d1, st1, addr2, max_meters=800.0):
+                continue
 
             candidates.append((diff_area, y))
 
