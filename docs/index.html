@@ -155,9 +155,9 @@
 
           <!-- 差異原因詳細說明 -->
           <div 
-            :class="item.status === 'NORMAL' ? 'text-emerald-700 bg-emerald-50' : 'text-amber-800 bg-amber-50'"
-            class="p-2 rounded-lg text-xs leading-relaxed">
-            <span class="font-semibold">診斷：</span>{{ item.diff_reason }}
+            :class="item.status === 'NORMAL' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-amber-900 bg-amber-50 border border-amber-200'"
+            class="p-2.5 rounded-lg text-xs leading-relaxed whitespace-pre-line">
+            <span class="font-bold text-xs block mb-1">📋 診斷說明：</span>{{ item.diff_reason }}
           </div>
 
           <!-- 連結按鈕 -->

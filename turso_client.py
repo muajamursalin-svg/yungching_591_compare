@@ -63,9 +63,17 @@ class TursoClient:
             ]
         }
 
-        res = requests.post(self.pipeline_url, headers=self.headers, json=payload, timeout=20)
-        res.raise_for_status()
-        data = res.json()
+        import time
+        for attempt in range(3):
+            try:
+                res = requests.post(self.pipeline_url, headers=self.headers, json=payload, timeout=35)
+                res.raise_for_status()
+                data = res.json()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                time.sleep(2)
 
         first_res = data.get("results", [])[0]
         if first_res.get("type") == "error":
@@ -109,9 +117,17 @@ class TursoClient:
         requests_list.append({"type": "close"})
         payload = {"requests": requests_list}
 
-        res = requests.post(self.pipeline_url, headers=self.headers, json=payload, timeout=60)
-        res.raise_for_status()
-        data = res.json()
+        import time
+        for attempt in range(3):
+            try:
+                res = requests.post(self.pipeline_url, headers=self.headers, json=payload, timeout=60)
+                res.raise_for_status()
+                data = res.json()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                time.sleep(2)
 
         for idx, r in enumerate(data.get("results", [])):
             if r.get("type") == "error":

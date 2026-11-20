@@ -111,7 +111,7 @@ class InventoryComparator:
             candidates.append((diff_area, y))
 
         if not candidates:
-            return None, "NOT_FOUND", "分店目前無此庫存物件 (疑似已成交下架或未在分店刊登)", 0.0
+            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登", 0.0
 
         # 若有多筆符合硬性條件，以 社區/路名吻合度 與 坪數誤差 排序
         def score_cand(item):
@@ -148,36 +148,49 @@ class InventoryComparator:
         has_price_diff = abs(diff_price) >= 1.0
         if has_price_diff:
             diff_label = f"永慶便宜 {abs(diff_price)}萬" if diff_price > 0 else f"591便宜 {abs(diff_price)}萬"
-            anomalies.append(f"總價不一致 (591標: {p1}萬 vs 永慶標: {p2}萬，{diff_label})")
+            anomalies.append(f"總價不一致：591 標 {p1}萬 vs 永慶標 {p2}萬 ({diff_label})")
 
         # 總樓高判斷
         has_allf_diff = False
         if allf1 > 0 and allf2 > 0 and allf1 != allf2:
             has_allf_diff = True
-            anomalies.append(f"總樓高出入 (591標: {allf1}樓高 vs 永慶標: {allf2}樓高)")
+            anomalies.append(f"總樓高出入：591 標 {allf1}樓高 vs 永慶標 {allf2}樓高")
 
         # 路名判斷
         has_street_diff = False
         if st1 and (st1 not in addr2 and st1 not in case2):
             has_street_diff = True
-            anomalies.append(f"路名出入 (591:「{st1}」 vs 永慶地址:「{addr2}」)")
+            anomalies.append(f"路名出入：591 標「{st1}」 vs 永慶地址「{addr2}」")
 
         # 特殊判斷：縣市區域、建坪、樓層、總價、總樓高都一樣，只有路名不同
         if not has_price_diff and not has_allf_diff and has_street_diff:
             status = "SPEC_MISMATCH"
-            reason = f"💡 提示：是否是路名有誤 (極少機會 但也有可能)（縣市/區域/樓層/建坪/總價({p1}萬)/總樓高皆一致，僅路名 591「{st1}」vs 永慶「{addr2}」不同）"
+            reason = (
+                f"💡 提示：是否是路名有誤 (極少機會 但也有可能)\n"
+                f"• 縣市/區域/樓層/建坪/總價/總高皆一致\n"
+                f"• 591 路名:「{st1}」\n"
+                f"• 永慶地址:「{addr2}」"
+            )
             return best_y, status, reason, confidence
 
         if has_price_diff:
             status = "PRICE_MISMATCH"
-            reason = "；".join(anomalies)
+            reason = "\n".join([f"• {a}" for a in anomalies])
         elif anomalies:
             status = "SPEC_MISMATCH"
-            reason = "；".join(anomalies)
+            reason = "\n".join([f"• {a}" for a in anomalies])
         else:
             status = "NORMAL"
             f_disp = f"{f1}樓" if f1 != 99 else "整棟"
-            reason = f"正常在售：縣市/區域/路名相符，總價({p1}萬)、樓層({f_disp})、建坪({a1}坪)、屋齡({age1}年)、總高皆一致"
+            age_disp = f"{age1}年" if age1 > 0 else "未載明"
+            reason = (
+                f"🟢 正常在售：縣市與區域完全吻合\n"
+                f"• 總價一致 ({p1}萬)\n"
+                f"• 樓層一致 ({f_disp})\n"
+                f"• 建坪相符 ({a1}坪)\n"
+                f"• 屋齡相符 ({age_disp})\n"
+                f"• 總樓高與路名皆相符"
+            )
 
         return best_y, status, reason, confidence
 
