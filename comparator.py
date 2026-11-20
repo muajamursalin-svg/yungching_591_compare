@@ -420,6 +420,8 @@ class InventoryComparator:
         if not full_shop_url:
             if platform == "5168":
                 full_shop_url = f"https://realtor.houseprice.tw/agent/buy/{shop_id}/"
+            elif platform == "rakuya":
+                full_shop_url = f"https://vip.rakuya.com.tw/{shop_id}/sell"
             else:
                 full_shop_url = f"https://www.591.com.tw/broker{shop_id}"
 

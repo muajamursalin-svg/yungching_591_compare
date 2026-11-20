@@ -125,7 +125,11 @@ function doPost(e) {
         const match5168 = userMsg.match(/realtor\.houseprice\.tw\/(?:agent|store)\/buy\/([0-9a-zA-Z_-]+)/i) || 
                           userMsg.match(/houseprice\.tw[^\s]*\/buy\/([0-9a-zA-Z_-]+)/i);
         
-        // 2. 偵測 591 店鋪網址或純代號
+        // 2. 偵測 樂屋網 VIP 店鋪網址
+        const matchRakuya = userMsg.match(/vip\.rakuya\.com\.tw\/([0-9a-zA-Z_-]+)/i) ||
+                            userMsg.match(/rakuya\.com\.tw[^\s]*\/([0-9a-zA-Z_-]+)/i);
+
+        // 3. 偵測 591 店鋪網址或純代號
         const match591 = userMsg.match(/broker(\d+)/i) || 
                          userMsg.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || 
                          userMsg.match(/^(\d{4,6})$/);
@@ -133,6 +137,9 @@ function doPost(e) {
         if (match5168) {
           platform = "5168";
           shopId = match5168[1];
+        } else if (matchRakuya) {
+          platform = "rakuya";
+          shopId = matchRakuya[1];
         } else if (match591) {
           platform = "591";
           shopId = match591[1];
@@ -194,6 +201,7 @@ function doPost(e) {
             `請直接貼上您的店鋪網址，例如：\n` +
             `🏠 591 店鋪：\nhttps://www.591.com.tw/broker12017\n\n` +
             `🏠 5168 房仲店鋪：\nhttps://realtor.houseprice.tw/agent/buy/0968682023/\n\n` +
+            `🏠 樂屋網 VIP 店鋪：\nhttps://vip.rakuya.com.tw/0937234338/\n\n` +
             `系統將自動解析庫存，並依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，標註「疑似已下架」或「價格調整」！`
           );
         }
@@ -341,8 +349,9 @@ function triggerGitHubActions(repo, token, shopId, shopUrl, userId, platform) {
   }
 
   const url = `https://api.github.com/repos/${repo}/dispatches`;
+  const eventType = platform === "5168" ? "compare_5168" : (platform === "rakuya" ? "compare_rakuya" : "compare_591");
   const payload = {
-    event_type: "compare_591",
+    event_type: eventType,
     client_payload: {
       platform: platform || "591",
       shop_id: shopId,

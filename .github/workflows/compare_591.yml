@@ -2,13 +2,13 @@ name: Multi-Platform Shop Inventory Comparison
 
 on:
   repository_dispatch:
-    types: [compare_591, compare_5168, compare_inventory]
+    types: [compare_591, compare_5168, compare_rakuya, compare_inventory]
   workflow_dispatch:
     inputs:
       shop_id:
-        description: '店鋪 ID 或網址 (例如 591 broker12017 或 5168 https://realtor.houseprice.tw/agent/buy/0968682023/)'
+        description: '店鋪 ID 或網址 (例如 591 broker12017、5168 或 樂屋網 https://vip.rakuya.com.tw/0937234338/)'
         required: true
-        default: 'https://realtor.houseprice.tw/agent/buy/0968682023/'
+        default: 'https://vip.rakuya.com.tw/0937234338/'
       user_id:
         description: 'LINE 使用者 ID (用於推播完成通知，選填)'
         required: false
@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests
+          pip install requests curl_cffi
 
       - name: Run Multi-Platform Crawler & Comparator
         env:

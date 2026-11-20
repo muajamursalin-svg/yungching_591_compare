@@ -11,6 +11,7 @@ import json
 import requests
 from crawler_591 import T591ShopCrawler
 from crawler_5168 import HousePrice5168Crawler
+from crawler_rakuya import RakuyaShopCrawler
 from comparator import InventoryComparator
 from turso_client import TursoClient
 
@@ -115,6 +116,9 @@ def main():
         crawler_5168 = HousePrice5168Crawler(db)
         account, account_type = crawler_5168.extract_account_info(shop_input)
         shop_id = account
+    elif platform == "rakuya":
+        crawler_rakuya = RakuyaShopCrawler(db)
+        shop_id = crawler_rakuya.extract_shop_id(shop_input)
     else:
         crawler_591 = T591ShopCrawler(db)
         shop_id = crawler_591.extract_shop_id(shop_input)
@@ -148,6 +152,8 @@ def main():
     # 3. 爬取最新庫存並轉換為標準格式
     if platform == "5168":
         shop_id, full_shop_url, std_houses = crawler_5168.crawl_and_get_standard_houses(shop_input)
+    elif platform == "rakuya":
+        shop_id, full_shop_url, std_houses = crawler_rakuya.crawl_and_get_standard_houses(shop_input)
     else:
         shop_id, full_shop_url, std_houses = crawler_591.crawl_and_get_standard_houses(shop_input)
 
