@@ -82,9 +82,11 @@ def main():
         send_line_push_notification(user_id, summary_msg, liff_target_url)
         return
 
+    shop_url = os.environ.get("SHOP_URL") or shop_input
+
     # 若無快取，進行完整爬取與比對
     crawler.crawl_and_save(shop_input)
-    report_id = comparator.run_comparison(shop_id, shop_url=shop_input, user_id=user_id)
+    report_id = comparator.run_comparison(shop_id, shop_url=shop_url, user_id=user_id)
 
     # 查詢統計並發送通知
     report = db.execute("SELECT * FROM compare_reports WHERE report_id = ?;", [report_id])

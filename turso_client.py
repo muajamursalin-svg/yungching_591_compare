@@ -8,8 +8,12 @@ class TursoClient:
     透過 Turso 的 /v2/pipeline API 直接執行 SQL，無需任何 C/SQLite 底層編譯依賴。
     """
     def __init__(self, db_url: Optional[str] = None, auth_token: Optional[str] = None):
+        # 1. 優先從傳入參數或環境變數 (GitHub Actions / OS Environment) 讀取
+        db_url = db_url or os.environ.get("TURSO_DATABASE_URL")
+        auth_token = auth_token or os.environ.get("TURSO_AUTH_TOKEN")
+
+        # 2. 若仍沒有，嘗試從本地 .env 檔案讀取
         if not db_url or not auth_token:
-            # 自動從 .env 讀取
             env_file = os.path.join(os.path.dirname(__file__), ".env")
             if os.path.exists(env_file):
                 with open(env_file, "r", encoding="utf-8") as f:

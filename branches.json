@@ -6,4 +6,74 @@
     "enabled": true,
     "note": "主要示範分店"
   }
+  {
+    "branch_id": "0424267689",
+    "name": "永義房屋 水湳經貿創翊加盟店",
+    "brand": "永義房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0424733939",
+    "name": "永慶房屋 向上品豐加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0424260693",
+    "name": "永義房屋 水湳中清愛買加盟店",
+    "brand": "永義房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0424265100",
+    "name": "永慶房屋 水湳中清愛買加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0422977000",
+    "name": "永慶房屋 水湳經貿創毅加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0427070855",
+    "name": "永慶房屋 逢甲河南創義加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0424621919",
+    "name": "永義房屋 台中福科安和加盟店",
+    "brand": "永義房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0424638855",
+    "name": "永慶房屋 台中安和福科加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0423591128",
+    "name": "永義房屋 臺灣大道創新加盟店",
+    "brand": "永義房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
+  {
+    "branch_id": "0423508080",
+    "name": "永慶房屋 西屯安和創意加盟店",
+    "brand": "永慶房屋",
+    "enabled": true,
+    "note": "主要示範分店"
+  }
 ]
