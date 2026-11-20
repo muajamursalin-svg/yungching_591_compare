@@ -200,9 +200,10 @@
         const shopId = urlParams.get('shop_id') || '12017';
         const customToken = urlParams.get('token');
 
-        // Turso 連線資訊 (建議使用唯讀 Token，或由 URL / GAS 代理帶入)
+        // Turso 連線資訊
+        const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw';
         const TURSO_URL = 'https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io/v2/pipeline';
-        const TURSO_TOKEN = customToken || window.TURSO_READONLY_TOKEN || '';
+        const TURSO_TOKEN = customToken || window.TURSO_READONLY_TOKEN || DEFAULT_TURSO_TOKEN;
 
         async function queryTurso(sql, args = []) {
           const stmt = { sql };

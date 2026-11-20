@@ -2,9 +2,14 @@ import re
 import json
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from turso_client import TursoClient
+
+TAIWAN_TZ = timezone(timedelta(hours=8))
+
+def get_tw_now_str() -> str:
+    return datetime.now(TAIWAN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 class T591ShopCrawler:
     BASE_URL = "https://bff-house.591.com.tw/v2/web/shop/house/list"
@@ -74,7 +79,7 @@ class T591ShopCrawler:
         return all_houses
 
     def save_to_turso(self, shop_id: str, houses: List[Dict[str, Any]]):
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_tw_now_str()
         agent_name = houses[0].get("linkman", "") if houses else ""
         shop_title = houses[0].get("nick_name", "") if houses else ""
 
