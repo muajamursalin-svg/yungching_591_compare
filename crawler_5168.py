@@ -171,6 +171,8 @@ class HousePrice5168Crawler:
             if any(t in case_type for t in ["透天", "別墅", "整棟"]):
                 fl = 99
 
+            raw_age = float(c.get("buildAge") or 0.0) if c.get("buildAge") is not None else 0.0
+
             params = [
                 hid,
                 account,
@@ -187,7 +189,7 @@ class HousePrice5168Crawler:
                 comm.get("communityName") or "",
                 c.get("purposeName") or "",
                 case_type,
-                float(c.get("buildAge") or 0.0) if c.get("buildAge") is not None else 0.0,
+                raw_age,
                 pic.get("coverUrl") or "",
                 c.get("caseUrl") or f"https://buy.houseprice.tw/house/{hid}/",
                 now_str

@@ -138,7 +138,9 @@ CREATE TABLE IF NOT EXISTS compare_reports (
     not_found_count INTEGER,
     spec_diff_count INTEGER,
     created_at TEXT,
-    platform TEXT DEFAULT '591' -- 平台代碼 ('591', '5168', 'rakuya')
+    platform TEXT DEFAULT '591', -- 平台代碼 ('591', '5168', 'rakuya')
+    yc_inventory_count INTEGER,  -- 永慶分店在庫總數
+    yc_synced_at TEXT            -- 永慶分店最新刷新時間
 );
 
 CREATE INDEX IF NOT EXISTS idx_compare_cache ON compare_reports (user_id, shop_id, created_at);

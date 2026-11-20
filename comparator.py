@@ -78,14 +78,15 @@ class InventoryComparator:
         階段一 (Hard Filters 硬性門檻)：
           1. 縣市、行政區嚴格完全相同 (不同即判定為不同物件)
           2. 所在樓層嚴格完全相同 (非透天/整棟需一致；透天整棟相容 99、1、0、-1 地下車庫別墅)
-          3. 總樓高差距只能正負 1 樓 (落差太大判定不同社區)
-          4. 建物登記坪數容許誤差 <= 1.5 坪
-          5. 屋齡容許誤差 <= 2.5 年 (排除差了幾十年的老屋新屋誤配)
+          3. 建物登記坪數容許誤差 <= 1.5 坪
+          4. 社區名稱若吻合，總樓高放寬至 +-3 樓 (因頂樓屋突/地下室計算常有出入)；無社區吻合則限制 +-1 樓
+          5. 屋齡比對：若社區吻合不硬性排除 (留待第二階段提示填寫有誤)；無社區吻合則容許誤差 <= 3.0 年
           6. 道路經緯度距離定位檢核：若無社區吻合且兩條路相距 > 800 公尺 -> 判定不同物件
 
         階段二 (Difference Diagnostics 差異診斷)：
           - 總價差 >= 1 萬標註價差
           - 總樓高出入標註樓高差
+          - 屋齡出入標註屋齡差 (例如標 108年、113年 或差距 > 2.5 年)
           - 路名出入標註路名差
           - 若縣市/區域/建坪/樓層/總價/總高皆一致，僅路名不同 -> 特別提示：是否是路名有誤 (極少機會 但也有可能)
         
@@ -103,7 +104,7 @@ class InventoryComparator:
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
-        # 1. 第一階段：硬性特徵比對 (縣市、行政區、樓層、總樓高、建坪、屋齡、路網距離)
+        # 1. 第一階段：硬性特徵比對
         candidates = []
         for y in yc_list:
             c2 = (y.get("county") or "").strip()
@@ -123,23 +124,11 @@ class InventoryComparator:
                 if f2 not in [-1, 0, 1, 99] and to_f2 != up_f2:
                     continue
 
-            # 總樓高比對 (硬性門檻：只能正負 1 樓差距，落差太大判定不同社區)
-            if allf1 > 0 and up_f2 > 0:
-                if abs(allf1 - up_f2) > 1:
-                    continue
-
             # 建物登記坪數 (容許誤差 <= 1.5 坪)
             a2 = float(y.get("reg_area") or 0.0)
             diff_area = abs(a1 - a2)
             if diff_area > 1.5:
                 continue
-
-            # 屋齡比對：雙方皆有屋齡時，容許誤差 <= 2.5 年 (排除差了幾十年的老屋新屋誤配)
-            age2 = float(y.get("build_age") or 0.0)
-            if age1 > 0 and age2 > 0:
-                diff_age = abs(age1 - age2)
-                if diff_age > 2.5:
-                    continue
 
             # 社區名稱吻合度檢查
             comm2 = clean_text(y.get("community_name") or "")
@@ -151,42 +140,53 @@ class InventoryComparator:
             elif comm2 and comm2 in t1:
                 comm_match = True
 
+            # 總樓高比對：若社區吻合放寬至 +-3 樓 (避免因頂樓屋突、地下室計算出入被誤判下架)；無社區吻合則限制 +-1 樓
+            max_floor_diff = 3 if comm_match else 1
+            if allf1 > 0 and up_f2 > 0:
+                if abs(allf1 - up_f2) > max_floor_diff:
+                    continue
+
+            # 屋齡比對：若社區吻合不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
+            # 若無社區吻合，雙方皆有屋齡時，容許誤差 <= 3.0 年
+            age2 = float(y.get("build_age") or 0.0)
+            if not comm_match and age1 > 0 and age2 > 0:
+                if abs(age1 - age2) > 3.0:
+                    continue
+
             # 道路經緯度距離定位檢核：若無社區吻合，且兩條路實際相距超過 800 公尺 -> 判定不同物件！
             if not comm_match and is_road_too_far(d1, st1, addr2, max_meters=800.0):
                 continue
 
-            candidates.append((diff_area, y))
+            candidates.append((diff_area, y, comm_match))
 
         if not candidates:
             return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登", 0.0
 
         # 若有多筆符合硬性條件，以 社區/路名吻合度 與 坪數誤差 排序
         def score_cand(item):
-            diff_a, y = item
+            diff_a, y, c_match = item
             score = 50.0  # 通過硬性篩選的基本分
-            comm2 = clean_text(y.get("community_name") or "")
+            if c_match:
+                score += 35.0
+
             case2 = clean_text(y.get("case_name") or "")
             addr2 = (y.get("address") or "").strip()
-
-            if comm1 and comm2 and (comm1 in comm2 or comm2 in comm1):
-                score += 30.0
-            elif comm2 and comm2 in t1:
-                score += 25.0
-
-            if st1 and (st1 in addr2 or st1 in case2):
+            st1_norm = st1.replace('臺', '台')
+            if st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2):
                 score += 20.0
 
             score += max(0.0, 10.0 - diff_a * 5)
             return score
 
         candidates.sort(key=score_cand, reverse=True)
-        best_diff_a, best_y = candidates[0]
-        confidence = min(100.0, score_cand((best_diff_a, best_y)))
+        best_diff_a, best_y, _ = candidates[0]
+        confidence = min(100.0, score_cand((best_diff_a, best_y, _)))
 
         # 2. 第二階段：細節差異診斷
         anomalies = []
         p2 = float(best_y.get("price") or 0.0)
         allf2 = int(best_y.get("up_floor") or 0)
+        age2 = float(best_y.get("build_age") or 0.0)
         addr2 = (best_y.get("address") or "").strip()
         case2 = (best_y.get("case_name") or "").strip()
 
@@ -203,6 +203,12 @@ class InventoryComparator:
             has_allf_diff = True
             anomalies.append(f"總樓高出入：{platform_name} 標 {allf1}樓高 vs 永慶標 {allf2}樓高")
 
+        # 屋齡判斷 (若差異大於 2.5 年，進行出入提示)
+        has_age_diff = False
+        if age1 > 0 and age2 > 0 and abs(age1 - age2) > 2.5:
+            has_age_diff = True
+            anomalies.append(f"屋齡出入：{platform_name} 標 {age1}年 vs 永慶標 {age2}年 (疑似屋齡填寫有誤)")
+
         # 路名判斷 (統一 臺/台)
         has_street_diff = False
         st1_norm = st1.replace('臺', '台')
@@ -212,8 +218,8 @@ class InventoryComparator:
             has_street_diff = True
             anomalies.append(f"路名出入：{platform_name} 標「{st1}」 vs 永慶地址「{addr2}」")
 
-        # 特殊判斷：縣市區域、建坪、樓層、總價、總樓高都一樣，只有路名不同
-        if not has_price_diff and not has_allf_diff and has_street_diff:
+        # 特殊判斷：縣市區域、建坪、樓層、總價、總樓高、屋齡都一樣，只有路名不同
+        if not has_price_diff and not has_allf_diff and not has_age_diff and has_street_diff:
             status = "SPEC_MISMATCH"
             reason = (
                 f"💡 提示：是否是路名有誤 (極少機會 但也有可能)\n"
@@ -332,7 +338,10 @@ class InventoryComparator:
             LEFT JOIN branches b ON y.branch_id = b.branch_id;
             """
         )
-        print(f"{platform} 待比對: {len(std_houses)} 筆 | 永慶分店在庫: {len(yc_list)} 筆")
+        yc_inventory_count = len(yc_list)
+        yc_synced_at = max((y.get("updated_at") or "") for y in yc_list) if yc_list else ""
+
+        print(f"{platform} 待比對: {len(std_houses)} 筆 | 永慶分店在庫: {yc_inventory_count} 筆 (最新同步: {yc_synced_at})")
 
         matched_count = 0
         price_diff_count = 0
@@ -381,7 +390,7 @@ class InventoryComparator:
                     status, reason, confidence, now_str, platform
                 ))
 
-        # 4. 儲存報告主表 (記錄 shop_url 與 user_id 與 platform)
+        # 4. 儲存報告主表 (包含永慶分店在庫統計與同步時間)
         full_shop_url = shop_url
         if not full_shop_url:
             if platform == "5168":
@@ -393,12 +402,14 @@ class InventoryComparator:
             """
             INSERT INTO compare_reports (
                 report_id, shop_id, shop_url, user_id, total_591_count, matched_count,
-                price_diff_count, not_found_count, spec_diff_count, created_at, platform
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                price_diff_count, not_found_count, spec_diff_count, created_at, platform,
+                yc_inventory_count, yc_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 report_id, shop_id, full_shop_url, user_id, len(std_houses), matched_count,
-                price_diff_count, not_found_count, spec_diff_count, now_str, platform
+                price_diff_count, not_found_count, spec_diff_count, now_str, platform,
+                yc_inventory_count, yc_synced_at
             ]
         )
 
@@ -430,7 +441,5 @@ class InventoryComparator:
 
 if __name__ == "__main__":
     comparator = InventoryComparator()
-    # 測試 591
-    # comparator.run_comparison("591", "12017")
     # 測試 5168
     comparator.run_comparison("5168", "0968682023")
