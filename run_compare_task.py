@@ -1,9 +1,24 @@
+# -*- coding: utf-8 -*-
+"""
+GitHub Actions 觸發之跨平台店鋪比對執行入口 (Multi-Platform Compare Task Runner)
+支援 591、5168 及未來擴充平台之自動識別、爬取、特徵比對與 LINE 推播通知
+"""
+
 import os
 import sys
 import requests
 from crawler_591 import T591ShopCrawler
+from crawler_5168 import HousePrice5168Crawler
 from comparator import InventoryComparator
 from turso_client import TursoClient
+
+def detect_platform(input_str: str) -> str:
+    s = input_str.lower()
+    if "houseprice.tw" in s or "5168" in s:
+        return "5168"
+    if "rakuya.com.tw" in s:
+        return "rakuya"
+    return "591"
 
 def send_line_push_notification(user_id: str, message: str, liff_url: str = ""):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -49,15 +64,25 @@ def main():
 
     user_id = os.environ.get("USER_ID", "")
     liff_base = os.environ.get("LIFF_URL", "")
+    shop_url = os.environ.get("SHOP_URL") or shop_input
+
+    platform = detect_platform(shop_input)
+    print(f"[*] 偵測到目標平台: {platform} (輸入: {shop_input})")
 
     db = TursoClient()
-    crawler = T591ShopCrawler(db)
-    shop_id = crawler.extract_shop_id(shop_input)
-
-    # 檢查是否在 1 分鐘內重複查詢
     comparator = InventoryComparator(db)
-    cached_rpt = comparator.check_recent_cache(shop_id, user_id=user_id, max_seconds=60)
 
+    # 1. 根據平台萃取店鋪 ID / 帳號
+    if platform == "5168":
+        crawler_5168 = HousePrice5168Crawler(db)
+        account, account_type = crawler_5168.extract_account_info(shop_input)
+        shop_id = account
+    else:
+        crawler_591 = T591ShopCrawler(db)
+        shop_id = crawler_591.extract_shop_id(shop_input)
+
+    # 2. 檢查 1 分鐘內快取
+    cached_rpt = comparator.check_recent_cache(shop_id, platform=platform, user_id=user_id, max_seconds=60)
     if cached_rpt:
         report_id = cached_rpt["report_id"]
         total = cached_rpt.get("total_591_count", 0)
@@ -68,10 +93,10 @@ def main():
         abnormal = not_found + price_diff + spec_diff
 
         summary_msg = (
-            f"⚡【591 店鋪比對報告（快取紀錄）】\n"
+            f"⚡【{platform} 店鋪比對報告（快取紀錄）】\n"
             f"（距前次比對未滿 1 分鐘，直接回傳最新結果）\n\n"
             f"📍 店鋪代號: {shop_id}\n"
-            f"📦 591 總在售: {total} 件\n"
+            f"📦 {platform} 總在售: {total} 件\n"
             f"🟢 正常在售: {matched} 件\n"
             f"⚠️ 異常物件: {abnormal} 件\n"
             f"  • 查無分店庫存 (疑似下架): {not_found} 件\n"
@@ -82,13 +107,24 @@ def main():
         send_line_push_notification(user_id, summary_msg, liff_target_url)
         return
 
-    shop_url = os.environ.get("SHOP_URL") or shop_input
+    # 3. 爬取最新庫存並轉換為標準格式
+    if platform == "5168":
+        shop_id, full_shop_url, std_houses = crawler_5168.crawl_and_get_standard_houses(shop_input)
+    else:
+        shop_id, full_shop_url, std_houses = crawler_591.crawl_and_get_standard_houses(shop_input)
 
-    # 若無快取，進行完整爬取與比對
-    crawler.crawl_and_save(shop_input)
-    report_id = comparator.run_comparison(shop_id, shop_url=shop_url, user_id=user_id)
+    target_shop_url = shop_url or full_shop_url
 
-    # 查詢統計並發送通知
+    # 4. 執行通用特徵比對
+    report_id = comparator.run_comparison(
+        platform=platform,
+        shop_id=shop_id,
+        houses=std_houses,
+        shop_url=target_shop_url,
+        user_id=user_id
+    )
+
+    # 5. 查詢統計並發送推播通知
     report = db.execute("SELECT * FROM compare_reports WHERE report_id = ?;", [report_id])
     if report:
         r = report[0]
@@ -100,9 +136,9 @@ def main():
         abnormal = not_found + price_diff + spec_diff
 
         summary_msg = (
-            f"🔔【591 店鋪庫存比對完成】\n\n"
+            f"🔔【{platform} 店鋪庫存比對完成】\n\n"
             f"📍 店鋪代號: {shop_id}\n"
-            f"📦 591 總在售: {total} 件\n"
+            f"📦 {platform} 總在售: {total} 件\n"
             f"🟢 正常在售: {matched} 件\n"
             f"⚠️ 異常物件: {abnormal} 件\n"
             f"  • 查無分店庫存 (疑似下架): {not_found} 件\n"

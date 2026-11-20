@@ -1,14 +1,14 @@
-name: Compare 591 Shop Inventory
+name: Multi-Platform Shop Inventory Comparison
 
 on:
   repository_dispatch:
-    types: [compare_591]
+    types: [compare_591, compare_5168, compare_inventory]
   workflow_dispatch:
     inputs:
       shop_id:
-        description: '591 店鋪 ID 或網址 (例如 12017 或 https://www.591.com.tw/broker12017)'
+        description: '店鋪 ID 或網址 (例如 591 broker12017 或 5168 https://realtor.houseprice.tw/agent/buy/0968682023/)'
         required: true
-        default: '12017'
+        default: 'https://realtor.houseprice.tw/agent/buy/0968682023/'
       user_id:
         description: 'LINE 使用者 ID (用於推播完成通知，選填)'
         required: false
@@ -30,7 +30,7 @@ jobs:
         run: |
           pip install requests
 
-      - name: Run 591 Crawler & Comparator
+      - name: Run Multi-Platform Crawler & Comparator
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

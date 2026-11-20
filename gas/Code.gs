@@ -118,24 +118,41 @@ function doPost(e) {
         const replyToken = event.replyToken;
         const userId = event.source.userId;
 
-        // 解析 591 店鋪 ID
-        const match = userMsg.match(/broker(\d+)/i) || userMsg.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || userMsg.match(/^(\d{4,6})$/);
-        
-        if (match) {
-          const shopId = match[1];
+        let platform = null;
+        let shopId = null;
 
+        // 1. 偵測 5168 房仲個人店鋪或加盟店網址
+        const match5168 = userMsg.match(/realtor\.houseprice\.tw\/(?:agent|store)\/buy\/([0-9a-zA-Z_-]+)/i) || 
+                          userMsg.match(/houseprice\.tw[^\s]*\/buy\/([0-9a-zA-Z_-]+)/i);
+        
+        // 2. 偵測 591 店鋪網址或純代號
+        const match591 = userMsg.match(/broker(\d+)/i) || 
+                         userMsg.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || 
+                         userMsg.match(/^(\d{4,6})$/);
+
+        if (match5168) {
+          platform = "5168";
+          shopId = match5168[1];
+        } else if (match591) {
+          platform = "591";
+          shopId = match591[1];
+        }
+
+        if (platform && shopId) {
           // 1. 檢查 1 分鐘內快取 (若距上次查詢小於 60 秒，直接秒回報告)
           const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
 
           if (cachedReport) {
-            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + (parseInt(cachedReport.price_diff_count) || 0) + (parseInt(cachedReport.spec_diff_count) || 0);
+            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + 
+                             (parseInt(cachedReport.price_diff_count) || 0) + 
+                             (parseInt(cachedReport.spec_diff_count) || 0);
             const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
 
             replyLineMessage(lineToken, replyToken,
-              `⚡【591 店鋪比對報告（快取紀錄）】\n` +
+              `⚡【${platform} 店鋪比對報告（快取紀錄）】\n` +
               `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
-              `📍 591 店鋪代號: ${shopId}\n` +
-              `📦 591 總在售: ${cachedReport.total_591_count} 件\n` +
+              `📍 ${platform} 店鋪代號: ${shopId}\n` +
+              `📦 ${platform} 總在售: ${cachedReport.total_591_count} 件\n` +
               `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
               `⚠️ 異常物件: ${abnormal} 件\n` +
               `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
@@ -147,13 +164,13 @@ function doPost(e) {
           }
 
           // 2. 超過 1 分鐘，觸發 GitHub Actions 執行最新比對
-          const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId);
+          const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId, platform);
 
           if (ghaSuccess) {
             replyLineMessage(lineToken, replyToken, 
-              `✅ 收到！已成功啟動庫存比對任務\n\n` +
-              `📍 591 店鋪代號: ${shopId}\n` +
-              `⏳ 系統正在同步 591 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
+              `✅ 收到！已成功啟動 ${platform} 庫存比對任務\n\n` +
+              `📍 ${platform} 店鋪代號: ${shopId}\n` +
+              `⏳ 系統正在同步 ${platform} 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
               `比對完成後，系統將會主動發送推播報告通知您！`
             );
           } else {
@@ -162,12 +179,13 @@ function doPost(e) {
             );
           }
         } else {
-          // 非 591 網址時的回應指引
+          // 非支援網址時的回應指引
           replyLineMessage(lineToken, replyToken, 
-            `👋 您好！我是房仲庫存比對助理。\n\n` +
-            `請直接貼上您的 591 店鋪網址，例如：\n` +
-            `https://www.591.com.tw/broker12017\n\n` +
-            `系統將依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，並標註「疑似已下架」或「價格調整」！`
+            `👋 您好！我是房仲跨平台庫存比對助理。\n\n` +
+            `請直接貼上您的店鋪網址，例如：\n` +
+            `🏠 591 店鋪：\nhttps://www.591.com.tw/broker12017\n\n` +
+            `🏠 5168 房仲店鋪：\nhttps://realtor.houseprice.tw/agent/buy/0968682023/\n\n` +
+            `系統將自動解析庫存，並依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，標註「疑似已下架」或「價格調整」！`
           );
         }
       }
@@ -243,7 +261,7 @@ function checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, maxSeconds) {
 /**
  * 觸發 GitHub Actions repository_dispatch 事件
  */
-function triggerGitHubActions(repo, token, shopId, shopUrl, userId) {
+function triggerGitHubActions(repo, token, shopId, shopUrl, userId, platform) {
   if (!repo || !token) {
     console.error("缺少 GITHUB_REPO 或 GITHUB_TOKEN 設定");
     return false;
@@ -253,6 +271,7 @@ function triggerGitHubActions(repo, token, shopId, shopUrl, userId) {
   const payload = {
     event_type: "compare_591",
     client_payload: {
+      platform: platform || "591",
       shop_id: shopId,
       shop_url: shopUrl,
       user_id: userId

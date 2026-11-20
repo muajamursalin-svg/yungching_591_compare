@@ -90,18 +90,55 @@ CREATE TABLE IF NOT EXISTS t591_houses (
 
 CREATE INDEX IF NOT EXISTS idx_591_shop ON t591_houses (shop_id);
 
+-- 5168 店鋪表
+CREATE TABLE IF NOT EXISTS t5168_shops (
+    account TEXT PRIMARY KEY,
+    shop_type TEXT,
+    agent_name TEXT,
+    shop_title TEXT,
+    sale_count INTEGER,
+    last_checked_at TEXT
+);
+
+-- 5168 房屋物件快照表
+CREATE TABLE IF NOT EXISTS t5168_houses (
+    house_id TEXT PRIMARY KEY,
+    account TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price REAL,             -- 總價(萬)
+    reg_area REAL,          -- 總坪數
+    main_area REAL,         -- 主建物坪數
+    floor INTEGER,          -- 樓層 (99為整棟)
+    all_floor INTEGER,      -- 總樓層
+    room INTEGER,           -- 房數
+    county TEXT,            -- 縣市
+    district TEXT,          -- 行政區
+    street TEXT,            -- 路名
+    community_name TEXT,    -- 社區名稱
+    kind_name TEXT,         -- 用途
+    case_type TEXT,         -- 建物型態
+    house_age REAL,         -- 屋齡 (年)
+    cover TEXT,             -- 圖片 URL
+    url TEXT,               -- 物件網址
+    updated_at TEXT,
+    FOREIGN KEY(account) REFERENCES t5168_shops(account)
+);
+
+CREATE INDEX IF NOT EXISTS idx_5168_account ON t5168_houses (account);
+
 -- 比對報告主表
 CREATE TABLE IF NOT EXISTS compare_reports (
     report_id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL,
-    shop_url TEXT,              -- 591 店鋪完整網址
+    shop_url TEXT,              -- 店鋪完整網址
     user_id TEXT,               -- LINE 使用者 ID (選填)
-    total_591_count INTEGER,
+    total_591_count INTEGER,    -- 平台在庫總數
     matched_count INTEGER,
     price_diff_count INTEGER,
     not_found_count INTEGER,
     spec_diff_count INTEGER,
-    created_at TEXT
+    created_at TEXT,
+    platform TEXT DEFAULT '591' -- 平台代碼 ('591', '5168', 'rakuya')
 );
 
 CREATE INDEX IF NOT EXISTS idx_compare_cache ON compare_reports (user_id, shop_id, created_at);
@@ -111,14 +148,14 @@ CREATE TABLE IF NOT EXISTS compare_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id TEXT NOT NULL,
     shop_id TEXT NOT NULL,
-    t591_id TEXT NOT NULL,
-    t591_title TEXT,
-    t591_price REAL,
-    t591_area REAL,
-    t591_floor TEXT,
-    t591_community TEXT,
-    t591_cover TEXT,
-    t591_url TEXT,
+    t591_id TEXT NOT NULL,      -- 目標平台物件編號 (通用鍵)
+    t591_title TEXT,            -- 目標平台物件標題
+    t591_price REAL,            -- 目標平台總價 (萬)
+    t591_area REAL,             -- 目標平台建坪
+    t591_floor TEXT,            -- 目標平台樓層
+    t591_community TEXT,        -- 目標平台社區名稱
+    t591_cover TEXT,            -- 目標平台封面照片
+    t591_url TEXT,              -- 目標平台物件連結
     matched_case_sid INTEGER,
     matched_branch_id TEXT,
     matched_branch_name TEXT,
@@ -128,6 +165,7 @@ CREATE TABLE IF NOT EXISTS compare_items (
     diff_reason TEXT,           -- 詳細原因說明
     confidence_score REAL,      -- 匹配信心度 (0 ~ 100)
     created_at TEXT,
+    platform TEXT DEFAULT '591',-- 平台代碼 ('591', '5168', 'rakuya')
     FOREIGN KEY(report_id) REFERENCES compare_reports(report_id)
 );
 

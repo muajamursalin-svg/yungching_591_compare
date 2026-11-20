@@ -183,6 +183,65 @@ class T591ShopCrawler:
         if batch_stmts:
             self.db.batch(batch_stmts)
 
+    @staticmethod
+    def to_standard_houses(houses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        將 591 原始案件資料轉換為跨平台通用 StandardHouse 規格
+        """
+        standard_list = []
+        for h in houses:
+            hid = str(h.get("id"))
+            p_val = T591ShopCrawler.parse_price(h.get("price", ""))
+            fl = int(h.get("floor")) if str(h.get("floor", "")).isdigit() else 0
+            allfl = int(h.get("allfloor")) if str(h.get("allfloor", "")).isdigit() else 0
+            room = int(h.get("room")) if str(h.get("room", "")).isdigit() else 0
+            raw_age = str(h.get("houseage", "")).strip()
+            age_val = float(raw_age) if raw_age.replace(".", "").isdigit() else 0.0
+
+            # 若為透天或整棟，樓層標記為 99
+            kind = h.get("kind_name") or ""
+            shape = int(h.get("shape") or 0)
+            if shape in [3, 4] or any(k in kind for k in ["透天", "別墅", "整棟"]):
+                if fl in [0, 1, 99]:
+                    fl = 99
+
+            std_item = {
+                "platform": "591",
+                "house_id": hid,
+                "title": h.get("fulladdress") or h.get("address") or "",
+                "url": f"https://sale.591.com.tw/sale-detail-{hid}.html",
+                "county": (h.get("regionname") or "").strip(),
+                "district": (h.get("sectionname") or "").strip(),
+                "street": (h.get("street_name") or "").strip(),
+                "community_name": re.sub(r'<[^>]+>', '', h.get("cases_name") or "").strip(),
+                "price": p_val,
+                "reg_area": float(h.get("area") or 0.0),
+                "main_area": float(h.get("mainarea") or 0.0) if h.get("mainarea") else None,
+                "floor": fl,
+                "all_floor": allfl,
+                "house_age": age_val,
+                "room": room,
+                "case_type": kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"),
+                "cover": h.get("cover") or "",
+                "agent_name": h.get("linkman") or ""
+            }
+            standard_list.append(std_item)
+        return standard_list
+
+    def crawl_and_get_standard_houses(self, shop_input: str) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """
+        爬取 591 店鋪，持久化至 Turso，並回傳 (shop_id, full_shop_url, standard_houses)
+        """
+        shop_id = self.extract_shop_id(shop_input)
+        full_shop_url = f"https://www.591.com.tw/broker{shop_id}"
+        print(f"\n================ 開始抓取 591 店鋪 {shop_id} ================")
+        houses = self.fetch_all_houses(shop_id)
+        print(f"共抓取 {len(houses)} 筆 591 在售庫存，正在儲存至 Turso...")
+        self.save_to_turso(shop_id, houses)
+        print(f"✅ 591 店鋪 {shop_id} 快照儲存完成！")
+        std_houses = self.to_standard_houses(houses)
+        return shop_id, full_shop_url, std_houses
+
     def crawl_and_save(self, shop_input: str) -> str:
         shop_id = self.extract_shop_id(shop_input)
         print(f"\n================ 開始抓取 591 店鋪 {shop_id} ================")
