@@ -148,6 +148,11 @@
                 <span>樓層: {{ item.t591_floor }}</span>
                 <span v-if="item.t591_community">• {{ item.t591_community }}</span>
               </div>
+              <!-- 縣市區域路名顯示 -->
+              <div v-if="item.t591_address" class="text-xs text-slate-600 mt-1 flex items-center gap-1 font-medium">
+                <span class="text-slate-400">📍</span>
+                <span>{{ item.t591_address }}</span>
+              </div>
             </div>
           </div>
 
@@ -326,7 +331,10 @@
         });
 
         const platformLabel = computed(() => {
-          if (report.value?.platform) return report.value.platform;
+          const p = (report.value?.platform || '').toLowerCase();
+          if (p === 'rakuya') return '樂屋網';
+          if (p === '5168') return '5168';
+          if (report.value?.shop_url && report.value.shop_url.includes('rakuya')) return '樂屋網';
           if (report.value?.shop_url && report.value.shop_url.includes('houseprice')) return '5168';
           return '591';
         });
@@ -365,7 +373,8 @@
               const matchTitle = (item.t591_title || '').toLowerCase().includes(kw);
               const matchComm = (item.t591_community || '').toLowerCase().includes(kw);
               const matchId = (item.t591_id || '').includes(kw);
-              if (!matchTitle && !matchComm && !matchId) return false;
+              const matchAddr = (item.t591_address || '').toLowerCase().includes(kw);
+              if (!matchTitle && !matchComm && !matchId && !matchAddr) return false;
             }
 
             return true;

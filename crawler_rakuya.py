@@ -248,6 +248,9 @@ class RakuyaShopCrawler:
             [shop_id, meta.get("agent_name"), meta.get("shop_title"), meta.get("company_name"), len(houses), now_str]
         )
 
+        # 1.5 清理既有店鋪快照，徹底避免已下架物件殘留
+        self.db.execute("DELETE FROM trakuya_houses WHERE shop_id = ?;", [shop_id])
+
         # 2. 批量儲存物件快照
         upsert_sql = """
             INSERT INTO trakuya_houses (

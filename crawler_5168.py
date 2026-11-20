@@ -129,6 +129,9 @@ class HousePrice5168Crawler:
             [account, account_type, agent_name, shop_title, len(raw_cases), now_str]
         )
 
+        # 1.5 清理既有店鋪快照，避免已下架物件殘留
+        self.db.execute("DELETE FROM t5168_houses WHERE account = ?;", [account])
+
         # 2. 批次更新物件快照
         upsert_sql = """
             INSERT INTO t5168_houses (

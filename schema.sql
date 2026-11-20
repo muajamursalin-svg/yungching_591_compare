@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS compare_items (
     confidence_score REAL,      -- 匹配信心度 (0 ~ 100)
     created_at TEXT,
     platform TEXT DEFAULT '591',-- 平台代碼 ('591', '5168', 'rakuya')
+    t591_address TEXT,          -- 目標平台縣市區域路名 (完整地址)
     FOREIGN KEY(report_id) REFERENCES compare_reports(report_id)
 );
 

@@ -165,10 +165,10 @@ class InventoryComparator:
             elif comm2 and comm2 in t1:
                 comm_match = True
 
-            # 總樓高比對：若社區吻合放寬至 +-3 樓 (避免因頂樓屋突、地下室計算出入被誤判下架)；無社區吻合則限制 +-1 樓
-            max_floor_diff = 3 if comm_match else 1
-            if allf1 > 0 and up_f2 > 0:
-                if abs(allf1 - up_f2) > max_floor_diff:
+            # 總樓高比對：若社區吻合則不在此階段硬排除 (留至第二階段提示，避免因地下室或頂樓計算出入被誤判下架)
+            # 若無社區吻合，總樓高容許誤差 <= 1 樓
+            if not comm_match and allf1 > 0 and up_f2 > 0:
+                if abs(allf1 - up_f2) > 1:
                     continue
 
             # 屋齡比對：若社區吻合不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
@@ -385,6 +385,7 @@ class InventoryComparator:
             comm_val = h.get("community_name") or ""
             cover_val = h.get("cover") or ""
             h_url = h.get("url") or ""
+            addr_val = f"{h.get('county') or ''}{h.get('district') or ''}{h.get('street') or ''}".strip()
 
             best_match, status, reason, confidence = self.match_house(h, yc_list)
 
@@ -406,14 +407,34 @@ class InventoryComparator:
                 report_items.append((
                     report_id, shop_id, hid, title, p_val, area_val, f_str, comm_val, cover_val, h_url,
                     sid, best_match.get("branch_id"), b_name, pyc, b_url,
-                    status, reason, confidence, now_str, platform
+                    status, reason, confidence, now_str, platform, addr_val
                 ))
             else:
                 report_items.append((
                     report_id, shop_id, hid, title, p_val, area_val, f_str, comm_val, cover_val, h_url,
                     None, None, None, None, None,
-                    status, reason, confidence, now_str, platform
+                    status, reason, confidence, now_str, platform, addr_val
                 ))
+
+        # 3.5 清理此店鋪先前的歷史比對報告 (確保資料庫只保留最新報告，避免累積重複歷史紀錄)
+        try:
+            self.db.execute(
+                """
+                DELETE FROM compare_items 
+                WHERE report_id IN (SELECT report_id FROM compare_reports WHERE shop_id = ? AND platform = ?);
+                """,
+                [shop_id, platform]
+            )
+            self.db.execute(
+                """
+                DELETE FROM compare_reports 
+                WHERE shop_id = ? AND platform = ?;
+                """,
+                [shop_id, platform]
+            )
+            print(f"🧹 已清理 {platform} 店鋪 {shop_id} 既有歷史比對記錄。")
+        except Exception as e:
+            print(f"[Warn] 清理歷史報告失敗: {e}")
 
         # 4. 儲存報告主表 (包含永慶分店在庫統計與同步時間)
         full_shop_url = shop_url
@@ -440,14 +461,14 @@ class InventoryComparator:
             ]
         )
 
-        # 5. 批次儲存明細表
+        # 5. 批次儲存明細表 (含 t591_address)
         insert_item_sql = """
             INSERT INTO compare_items (
                 report_id, shop_id, t591_id, t591_title, t591_price, t591_area, t591_floor,
                 t591_community, t591_cover, t591_url, matched_case_sid, matched_branch_id,
                 matched_branch_name, matched_price, matched_url, status, diff_reason,
-                confidence_score, created_at, platform
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                confidence_score, created_at, platform, t591_address
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         batch_items = [(insert_item_sql, list(item)) for item in report_items]
         chunk_size = 50
