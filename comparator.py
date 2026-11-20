@@ -75,11 +75,12 @@ class InventoryComparator:
         a1 = float(h.get("reg_area") or 0.0)
         p1 = float(h.get("price") or 0.0)
         allf1 = int(h.get("all_floor") or 0)
+        age1 = float(h.get("house_age") or 0.0)
         st1 = (h.get("street") or "").strip()
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
-        # 1. 第一階段：硬性特徵比對
+        # 1. 第一階段：硬性特徵比對 (縣市、行政區、樓層、建坪、屋齡)
         candidates = []
         for y in yc_list:
             c2 = (y.get("county") or "").strip()
@@ -99,6 +100,13 @@ class InventoryComparator:
             diff_area = abs(a1 - a2)
             if diff_area > 1.5:
                 continue
+
+            # 屋齡比對：雙方皆有屋齡時，容許誤差 <= 2.5 年 (排除差了幾十年的不同物件)
+            age2 = float(y.get("build_age") or 0.0)
+            if age1 > 0 and age2 > 0:
+                diff_age = abs(age1 - age2)
+                if diff_age > 2.5:
+                    continue
 
             candidates.append((diff_area, y))
 
@@ -169,7 +177,7 @@ class InventoryComparator:
         else:
             status = "NORMAL"
             f_disp = f"{f1}樓" if f1 != 99 else "整棟"
-            reason = f"正常在售：縣市/區域/路名相符，總價({p1}萬)、樓層({f_disp})、建坪({a1}坪)、總高皆一致"
+            reason = f"正常在售：縣市/區域/路名相符，總價({p1}萬)、樓層({f_disp})、建坪({a1}坪)、屋齡({age1}年)、總高皆一致"
 
         return best_y, status, reason, confidence
 
