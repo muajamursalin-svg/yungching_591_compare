@@ -175,12 +175,6 @@ class HousePrice5168Crawler:
                 fl = 99
 
             raw_age = float(c.get("buildAge") or 0.0) if c.get("buildAge") is not None else 0.0
-            # 5168 部分經紀人填寫或平台儲存的是「完工民國年份」(如 108年、113年)，若 >= 60 自動換算為實際屋齡
-            if raw_age >= 60.0:
-                current_roc_year = datetime.now().year - 1911
-                norm_age = max(0.0, round(current_roc_year - raw_age, 1))
-            else:
-                norm_age = raw_age
 
             params = [
                 hid,
@@ -198,7 +192,7 @@ class HousePrice5168Crawler:
                 comm.get("communityName") or "",
                 c.get("purposeName") or "",
                 case_type,
-                norm_age,
+                raw_age,
                 pic.get("coverUrl") or "",
                 c.get("caseUrl") or f"https://buy.houseprice.tw/house/{hid}/",
                 now_str
@@ -232,11 +226,6 @@ class HousePrice5168Crawler:
                     fl = 99
 
             raw_age = float(c.get("buildAge") or 0.0) if c.get("buildAge") is not None else 0.0
-            if raw_age >= 60.0:
-                current_roc_year = datetime.now().year - 1911
-                norm_age = max(0.0, round(current_roc_year - raw_age, 1))
-            else:
-                norm_age = raw_age
 
             std_item = {
                 "platform": "5168",
@@ -252,7 +241,7 @@ class HousePrice5168Crawler:
                 "main_area": float(c.get("mainPin") or 0.0) if c.get("mainPin") is not None else None,
                 "floor": int(fl),
                 "all_floor": int(allfl),
-                "house_age": norm_age,
+                "house_age": raw_age,
                 "room": int(c.get("rm") or 0),
                 "case_type": case_type,
                 "cover": pic.get("coverUrl") or "",

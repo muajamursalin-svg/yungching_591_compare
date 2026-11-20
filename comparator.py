@@ -124,10 +124,7 @@ class InventoryComparator:
         a1 = float(h.get("reg_area") or 0.0)
         p1 = float(h.get("price") or 0.0)
         allf1 = int(h.get("all_floor") or 0)
-        raw_age1 = float(h.get("house_age") or 0.0)
-        current_roc_year = datetime.now().year - 1911
-        # 若屋齡 >= 60，視為民國完工年份 (如 108年、113年)，自動換算為實際屋齡
-        age1 = max(0.0, round(current_roc_year - raw_age1, 1)) if raw_age1 >= 60.0 else raw_age1
+        age1 = float(h.get("house_age") or 0.0)
         st1 = (h.get("street") or "").strip()
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
@@ -174,11 +171,12 @@ class InventoryComparator:
                 if abs(allf1 - up_f2) > 1:
                     continue
 
-            # 屋齡比對：若社區吻合不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
-            # 若無社區吻合，雙方皆有屋齡時，容許誤差 <= 3.0 年
-            raw_age2 = float(y.get("build_age") or 0.0)
-            age2 = max(0.0, round(current_roc_year - raw_age2, 1)) if raw_age2 >= 60.0 else raw_age2
-            if not comm_match and age1 > 0 and age2 > 0:
+            # 屋齡比對：若社區吻合或路名吻合，不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
+            # 僅在無社區吻合且無路名吻合時，雙方皆有屋齡時限制誤差 <= 3.0 年
+            age2 = float(y.get("build_age") or 0.0)
+            st1_norm = st1.replace('臺', '台')
+            st_match = bool(st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2.replace('臺', '台')))
+            if not comm_match and not st_match and age1 > 0 and age2 > 0:
                 if abs(age1 - age2) > 3.0:
                     continue
 
@@ -215,8 +213,7 @@ class InventoryComparator:
         anomalies = []
         p2 = float(best_y.get("price") or 0.0)
         allf2 = int(best_y.get("up_floor") or 0)
-        raw_age2 = float(best_y.get("build_age") or 0.0)
-        age2 = max(0.0, round(current_roc_year - raw_age2, 1)) if raw_age2 >= 60.0 else raw_age2
+        age2 = float(best_y.get("build_age") or 0.0)
         addr2 = (best_y.get("address") or "").strip()
         case2 = (best_y.get("case_name") or "").strip()
 
@@ -248,7 +245,29 @@ class InventoryComparator:
             has_street_diff = True
             anomalies.append(f"路名出入：{platform_name} 標「{st1}」 vs 永慶地址「{addr2}」")
 
-        # 特殊判斷：縣市區域、建坪、樓層、總價、總樓高、屋齡都一樣，只有路名不同
+        # 特殊判斷 1：僅屋齡有出入，其他條件 (總價/建坪/樓層/總高/路名) 皆吻合
+        if not has_price_diff and not has_allf_diff and not has_street_diff and has_age_diff:
+            status = "SPEC_MISMATCH"
+            f_disp = f"{f1}樓" if f1 != 99 else "整棟"
+            reason = (
+                f"💡 提示：屋齡有出入 (疑似人員Key錯屋齡)\n"
+                f"• {platform_name} 標示屋齡：{age1} 年 vs 永慶標示屋齡：{age2} 年\n"
+                f"• 總價 ({p1}萬)、建坪 ({a1}坪)、樓層 ({f_disp})、總樓高 ({allf1}樓)、路名等其他條件皆完全相符"
+            )
+            return best_y, status, reason, confidence
+
+        # 特殊判斷 2：僅總樓高有出入，其他條件 (總價/建坪/樓層/屋齡/路名) 皆吻合
+        if not has_price_diff and not has_age_diff and not has_street_diff and has_allf_diff:
+            status = "SPEC_MISMATCH"
+            f_disp = f"{f1}樓" if f1 != 99 else "整棟"
+            reason = (
+                f"💡 提示：總樓高出入 (疑似含地下室或頂樓計算差異)\n"
+                f"• {platform_name} 標 {allf1} 樓高 vs 永慶標 {allf2} 樓高\n"
+                f"• 總價 ({p1}萬)、建坪 ({a1}坪)、樓層 ({f_disp})、屋齡 ({age1}年)、路名皆完全相符"
+            )
+            return best_y, status, reason, confidence
+
+        # 特殊判斷 3：縣市區域、建坪、樓層、總價、總樓高、屋齡都一樣，只有路名不同
         if not has_price_diff and not has_allf_diff and not has_age_diff and has_street_diff:
             status = "SPEC_MISMATCH"
             reason = (

@@ -3,8 +3,14 @@ import re
 import json
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from turso_client import TursoClient
+
+TAIWAN_TZ = timezone(timedelta(hours=8))
+
+def get_tw_now_str() -> str:
+    """取得標準台灣時間字串 (UTC+8)"""
+    return datetime.now(TAIWAN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def parse_taiwan_address(raw_addr: str) -> tuple:
     if not raw_addr:
@@ -29,7 +35,7 @@ class YungchingBranchSyncer:
 
     def acquire_sync_lock(self):
         """啟動分店同步鎖定 (防併發查詢，通知使用者正在刷新庫存)"""
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_tw_now_str()
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS system_locks (
@@ -57,7 +63,7 @@ class YungchingBranchSyncer:
 
     def release_sync_lock(self):
         """解除分店同步鎖定"""
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_tw_now_str()
         try:
             self.db.execute(
                 """
@@ -136,7 +142,7 @@ class YungchingBranchSyncer:
 
     def sync_branch(self, branch_cfg: dict):
         branch_id = branch_cfg["branch_id"]
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_tw_now_str()
         print(f"\n================ 開始同步分店: {branch_cfg.get('name', branch_id)} ({branch_id}) ================")
 
         # 1. 取得並更新分店基本資訊
