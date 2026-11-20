@@ -193,4 +193,25 @@ def main():
         send_line_push_notification(user_id, summary_msg, liff_target_url)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        err_detail = traceback.format_exc()
+        print(f"[FATAL ERROR IN RUN_COMPARE_TASK]\n{err_detail}", file=sys.stderr)
+        
+        # 嘗試推播失敗訊息給使用者
+        try:
+            raw_payload = os.environ.get("EVENT_PAYLOAD")
+            payload = json.loads(raw_payload) if raw_payload else {}
+            raw_inputs = os.environ.get("WORKFLOW_INPUTS")
+            inputs = json.loads(raw_inputs) if raw_inputs else {}
+            user_id = payload.get("user_id") or inputs.get("user_id") or os.environ.get("USER_ID", "")
+            if user_id:
+                send_line_push_notification(
+                    user_id,
+                    f"⚠️ 店鋪比對執行異常：\n{str(e)}\n\n請檢查店鋪網址或稍後再試。"
+                )
+        except Exception as notify_err:
+            print(f"[Warn] 發送失敗推播失敗: {notify_err}")
+        sys.exit(1)

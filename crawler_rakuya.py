@@ -62,10 +62,20 @@ class RakuyaShopCrawler:
     def fetch_page_html(self, shop_id: str, page: int = 1, sort: str = "21") -> str:
         # 使用 sort=21 (總價由高至低) 作為穩定排序，徹底避免 sort=11 (更新時間) 在分頁爬取過程中因時間戳記變動導致的「分頁排序漂移」
         url = f"{self.BASE_URL}/{shop_id}/sell?page={page}&sort={sort}#total"
-        res = requests.get(url, impersonate="chrome124", timeout=self.timeout)
-        if res.status_code != 200:
-            raise RuntimeError(f"樂屋網請求失敗 (HTTP {res.status_code}): {url}")
-        return res.text
+        impersonate_profiles = ["chrome124", "chrome120", "safari15_5"]
+        last_err = None
+        for attempt in range(len(impersonate_profiles)):
+            prof = impersonate_profiles[attempt]
+            try:
+                res = requests.get(url, impersonate=prof, timeout=self.timeout)
+                if res.status_code == 200 and len(res.text) > 1000:
+                    return res.text
+                else:
+                    last_err = RuntimeError(f"樂屋網請求失敗 (HTTP {res.status_code}): {url}")
+            except Exception as e:
+                last_err = e
+            time.sleep(1.0)
+        raise last_err or RuntimeError(f"樂屋網請求重試失敗: {url}")
 
     def extract_total_pages(self, html: str) -> int:
         m = re.search(r'class="pages">第\s*\d+\s*/\s*(\d+)\s*頁', html)

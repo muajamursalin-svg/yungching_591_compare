@@ -124,7 +124,10 @@ class InventoryComparator:
         a1 = float(h.get("reg_area") or 0.0)
         p1 = float(h.get("price") or 0.0)
         allf1 = int(h.get("all_floor") or 0)
-        age1 = float(h.get("house_age") or 0.0)
+        raw_age1 = float(h.get("house_age") or 0.0)
+        current_roc_year = datetime.now().year - 1911
+        # 若屋齡 >= 60，視為民國完工年份 (如 108年、113年)，自動換算為實際屋齡
+        age1 = max(0.0, round(current_roc_year - raw_age1, 1)) if raw_age1 >= 60.0 else raw_age1
         st1 = (h.get("street") or "").strip()
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
@@ -173,7 +176,8 @@ class InventoryComparator:
 
             # 屋齡比對：若社區吻合不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
             # 若無社區吻合，雙方皆有屋齡時，容許誤差 <= 3.0 年
-            age2 = float(y.get("build_age") or 0.0)
+            raw_age2 = float(y.get("build_age") or 0.0)
+            age2 = max(0.0, round(current_roc_year - raw_age2, 1)) if raw_age2 >= 60.0 else raw_age2
             if not comm_match and age1 > 0 and age2 > 0:
                 if abs(age1 - age2) > 3.0:
                     continue
@@ -211,7 +215,8 @@ class InventoryComparator:
         anomalies = []
         p2 = float(best_y.get("price") or 0.0)
         allf2 = int(best_y.get("up_floor") or 0)
-        age2 = float(best_y.get("build_age") or 0.0)
+        raw_age2 = float(best_y.get("build_age") or 0.0)
+        age2 = max(0.0, round(current_roc_year - raw_age2, 1)) if raw_age2 >= 60.0 else raw_age2
         addr2 = (best_y.get("address") or "").strip()
         case2 = (best_y.get("case_name") or "").strip()
 
