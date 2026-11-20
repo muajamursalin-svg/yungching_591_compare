@@ -1,0 +1,42 @@
+name: Compare 591 Shop Inventory
+
+on:
+  repository_dispatch:
+    types: [compare_591]
+  workflow_dispatch:
+    inputs:
+      shop_id:
+        description: '591 店鋪 ID 或網址 (例如 12017 或 https://www.591.com.tw/broker12017)'
+        required: true
+        default: '12017'
+      user_id:
+        description: 'LINE 使用者 ID (用於推播完成通知，選填)'
+        required: false
+        default: ''
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests
+
+      - name: Run 591 Crawler & Comparator
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          SHOP_INPUT: ${{ github.event.client_payload.shop_id || github.event.inputs.shop_id }}
+          USER_ID: ${{ github.event.client_payload.user_id || github.event.inputs.user_id }}
+          LIFF_URL: ${{ secrets.LIFF_URL }}
+        run: |
+          python run_compare_task.py

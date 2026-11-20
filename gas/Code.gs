@@ -1,0 +1,223 @@
+/**
+ * Google Apps Script (GAS) - LINE Bot Webhook 與 GitHub Actions 觸發排程器
+ * 
+ * 部署說明：
+ * 1. 在 Google Apps Script (script.google.com) 建立專案。
+ * 2. 在「專案設定」->「指令碼屬性 (Script Properties)」填入以下環境變數：
+ *    - LINE_CHANNEL_ACCESS_TOKEN: 您的 LINE Messaging API Channel Access Token
+ *    - GITHUB_TOKEN: 您的 GitHub Personal Access Token (需有 repo 權限)
+ *    - GITHUB_REPO: 您的 GitHub 倉庫路徑 (格式: "用戶名/專案名"，如 "steven0612/house-inventory")
+ *    - TURSO_DATABASE_URL: 您的 Turso URL (如 https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io)
+ *    - TURSO_AUTH_TOKEN: 您的 Turso Token
+ *    - LIFF_URL: 您的 GitHub Pages LIFF 網址
+ * 3. 部署為「網頁應用程式 (Web App)」，存取權限設為「任何人 (Anyone)」。
+ * 4. 將取得的 Web App URL 填入 LINE Developers Console 的 Webhook URL 並開啟 Use Webhook。
+ */
+
+function doPost(e) {
+  try {
+    const postData = JSON.parse(e.postData.contents);
+    const events = postData.events;
+    if (!events || events.length === 0) {
+      return ContentService.createTextOutput("OK");
+    }
+
+    const scriptProps = PropertiesService.getScriptProperties();
+    const lineToken = scriptProps.getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+    const githubToken = scriptProps.getProperty("GITHUB_TOKEN");
+    const githubRepo = scriptProps.getProperty("GITHUB_REPO");
+    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL");
+    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN");
+    const liffUrl = scriptProps.getProperty("LIFF_URL") || "";
+
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (event.type === "message" && event.message.type === "text") {
+        const userMsg = event.message.text.trim();
+        const replyToken = event.replyToken;
+        const userId = event.source.userId;
+
+        // 解析 591 店鋪 ID
+        const match = userMsg.match(/broker(\d+)/i) || userMsg.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || userMsg.match(/^(\d{4,6})$/);
+        
+        if (match) {
+          const shopId = match[1];
+
+          // 1. 檢查 1 分鐘內快取 (若距上次查詢小於 60 秒，直接秒回報告)
+          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
+
+          if (cachedReport) {
+            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + (parseInt(cachedReport.price_diff_count) || 0) + (parseInt(cachedReport.spec_diff_count) || 0);
+            const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
+
+            replyLineMessage(lineToken, replyToken,
+              `⚡【591 店鋪比對報告（快取紀錄）】\n` +
+              `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
+              `📍 591 店鋪代號: ${shopId}\n` +
+              `📦 591 總在售: ${cachedReport.total_591_count} 件\n` +
+              `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
+              `⚠️ 異常物件: ${abnormal} 件\n` +
+              `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
+              `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
+              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件\n\n` +
+              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : "")
+            );
+            continue;
+          }
+
+          // 2. 超過 1 分鐘，觸發 GitHub Actions 執行最新比對
+          const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId);
+
+          if (ghaSuccess) {
+            replyLineMessage(lineToken, replyToken, 
+              `✅ 收到！已成功啟動庫存比對任務\n\n` +
+              `📍 591 店鋪代號: ${shopId}\n` +
+              `⏳ 系統正在同步 591 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
+              `比對完成後，系統將會主動發送推播報告通知您！`
+            );
+          } else {
+            replyLineMessage(lineToken, replyToken, 
+              `⚠️ 抱歉，觸發比對排程時發生錯誤，請檢查 GitHub Token 設定。`
+            );
+          }
+        } else {
+          // 非 591 網址時的回應指引
+          replyLineMessage(lineToken, replyToken, 
+            `👋 您好！我是房仲庫存比對助理。\n\n` +
+            `請直接貼上您的 591 店鋪網址，例如：\n` +
+            `https://www.591.com.tw/broker12017\n\n` +
+            `系統將依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，並標註「疑似已下架」或「價格調整」！`
+          );
+        }
+      }
+    }
+
+    return ContentService.createTextOutput("OK");
+  } catch (err) {
+    console.error("doPost Error: " + err.toString());
+    return ContentService.createTextOutput("Error: " + err.toString());
+  }
+}
+
+/**
+ * 直接透過 Turso HTTP API 查詢 1 分鐘內的既有比對報告
+ */
+function checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, maxSeconds) {
+  if (!tursoUrl || !tursoToken) return null;
+
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const sql = "SELECT * FROM compare_reports WHERE shop_id = ? ORDER BY created_at DESC LIMIT 1;";
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: {
+            sql: sql,
+            args: [{ type: "text", value: shopId.toString() }]
+          }
+        },
+        { type: "close" }
+      ]
+    };
+
+    const res = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: {
+        "Authorization": "Bearer " + tursoToken,
+        "Content-Type": "application/json"
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() !== 200) return null;
+
+    const data = JSON.parse(res.getContentText());
+    const result = data.results[0]?.response?.result;
+    if (!result || !result.rows || result.rows.length === 0) return null;
+
+    const cols = result.cols.map(c => c.name);
+    const row = result.rows[0];
+    const rpt = {};
+    cols.forEach((col, idx) => {
+      rpt[col] = row[idx].value;
+    });
+
+    // 檢查時間差
+    if (rpt.created_at) {
+      const createdTime = new Date(rpt.created_at.replace(" ", "T") + "+08:00").getTime();
+      const now = new Date().getTime();
+      const diffSec = (now - createdTime) / 1000;
+      if (diffSec >= 0 && diffSec <= maxSeconds) {
+        return rpt;
+      }
+    }
+  } catch (err) {
+    console.warn("Turso cache check failed: " + err);
+  }
+  return null;
+}
+
+/**
+ * 觸發 GitHub Actions repository_dispatch 事件
+ */
+function triggerGitHubActions(repo, token, shopId, shopUrl, userId) {
+  if (!repo || !token) {
+    console.error("缺少 GITHUB_REPO 或 GITHUB_TOKEN 設定");
+    return false;
+  }
+
+  const url = `https://api.github.com/repos/${repo}/dispatches`;
+  const payload = {
+    event_type: "compare_591",
+    client_payload: {
+      shop_id: shopId,
+      shop_url: shopUrl,
+      user_id: userId
+    }
+  };
+
+  const options = {
+    method: "post",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "Google-Apps-Script-LineBot"
+    },
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const code = response.getResponseCode();
+  console.log(`GitHub Dispatch Response: ${code}`);
+  return code === 204 || code === 200;
+}
+
+/**
+ * LINE Messaging API 回覆訊息
+ */
+function replyLineMessage(token, replyToken, text) {
+  if (!token) return;
+  const url = "https://api.line.me/v2/bot/message/reply";
+  const payload = {
+    replyToken: replyToken,
+    messages: [
+      { type: "text", text: text }
+    ]
+  };
+
+  const options = {
+    method: "post",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  UrlFetchApp.fetch(url, options);
+}

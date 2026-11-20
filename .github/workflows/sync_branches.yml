@@ -1,0 +1,30 @@
+name: Sync Yungching Branches Inventory
+
+on:
+  schedule:
+    # 每天早上 8:00 與 下午 14:00 (UTC 0:00 & 6:00) 定時執行
+    - cron: '0 0,6 * * *'
+  workflow_dispatch: # 支援手動一鍵觸發
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests
+
+      - name: Run Branch Sync Script
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          python sync_branches.py

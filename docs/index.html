@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>591 與永慶分店庫存比對儀表板</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- LINE LIFF SDK -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="app" v-cloak class="max-w-md mx-auto pb-10">
+    <!-- 頂部導航 -->
+    <header class="bg-emerald-600 text-white px-4 py-4 shadow-md sticky top-0 z-30">
+      <div class="flex items-center justify-between">
+        <h1 class="text-lg font-bold flex items-center gap-2">
+          <span>🏠</span> 庫存比對儀表板
+        </h1>
+        <span v-if="report" class="text-xs bg-emerald-700 px-2 py-1 rounded">
+          店鋪: {{ report.shop_id }}
+        </span>
+      </div>
+      <p v-if="report" class="text-xs text-emerald-100 mt-1">
+        比對時間: {{ report.created_at }}
+      </p>
+    </header>
+
+    <!-- 載入中狀態 -->
+    <div v-if="loading" class="flex flex-col items-center justify-center p-12 text-slate-400">
+      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600 mb-3"></div>
+      <p class="text-sm">正在載入庫存比對報告...</p>
+    </div>
+
+    <!-- 錯誤提示 -->
+    <div v-else-if="error" class="p-6 m-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+      <div class="font-bold mb-1">載入失敗</div>
+      <div>{{ error }}</div>
+    </div>
+
+    <!-- 報告主體內容 -->
+    <main v-else-if="report" class="p-4 space-y-4">
+      <!-- 統計數據卡片 -->
+      <div class="grid grid-cols-2 gap-3">
+        <!-- 591 總在售 -->
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 font-medium">591 總在售</div>
+          <div class="text-2xl font-bold text-slate-800 mt-1">{{ report.total_591_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
+        </div>
+
+        <!-- 異常總數 -->
+        <div class="bg-red-50 p-3 rounded-xl border border-red-200 shadow-sm">
+          <div class="text-xs text-red-600 font-medium">異常需處理</div>
+          <div class="text-2xl font-bold text-red-600 mt-1">{{ abnormalCount }} <span class="text-xs font-normal text-red-400">件</span></div>
+        </div>
+
+        <!-- 查無分店庫存 (下架) -->
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span> 疑似已下架
+          </div>
+          <div class="text-xl font-bold text-slate-800 mt-1">{{ report.not_found_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
+        </div>
+
+        <!-- 價格不一致 -->
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span> 價格不一致
+          </div>
+          <div class="text-xl font-bold text-slate-800 mt-1">{{ report.price_diff_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
+        </div>
+      </div>
+
+      <!-- 分頁標籤篩選 -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+        <button 
+          v-for="tab in tabs" 
+          :key="tab.key"
+          @click="currentTab = tab.key"
+          :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold' : 'bg-white text-slate-600 border border-slate-200'"
+          class="px-3 py-1.5 rounded-full whitespace-nowrap transition-colors shadow-sm">
+          {{ tab.name }} ({{ tab.count }})
+        </button>
+      </div>
+
+      <!-- 搜尋框 -->
+      <div class="relative">
+        <input 
+          v-model="keyword"
+          type="text" 
+          placeholder="搜尋物件名稱、社區、路段..."
+          class="w-full bg-white border border-slate-200 text-sm rounded-xl px-3 py-2 pl-9 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <span class="absolute left-3 top-2.5 text-slate-400 text-sm">🔍</span>
+      </div>
+
+      <!-- 物件列表 -->
+      <div class="space-y-3">
+        <div v-if="filteredItems.length === 0" class="bg-white p-8 rounded-xl text-center text-slate-400 text-sm border border-slate-200">
+          無符合條件的物件
+        </div>
+
+        <div 
+          v-for="item in filteredItems" 
+          :key="item.id"
+          class="bg-white rounded-xl border border-slate-200 p-3 shadow-sm hover:border-slate-300 transition-all space-y-2">
+          
+          <!-- 狀態標籤與 ID -->
+          <div class="flex items-center justify-between">
+            <span 
+              :class="statusBadgeClass(item.status)"
+              class="text-xs font-semibold px-2 py-0.5 rounded-md">
+              {{ statusLabel(item.status) }}
+            </span>
+            <span class="text-[11px] text-slate-400 font-mono">591編號: {{ item.t591_id }}</span>
+          </div>
+
+          <!-- 物件主圖與資訊 -->
+          <div class="flex gap-3">
+            <img 
+              :src="item.t591_cover || 'https://via.placeholder.com/128x92?text=No+Image'" 
+              class="w-20 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0">
+            <div class="flex-1 min-w-0">
+              <h2 class="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
+                {{ item.t591_title }}
+              </h2>
+              <div class="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-2">
+                <span>{{ item.t591_area }} 坪</span>
+                <span>•</span>
+                <span>樓層: {{ item.t591_floor }}</span>
+                <span v-if="item.t591_community">• {{ item.t591_community }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 價格比較列 -->
+          <div class="bg-slate-50 p-2 rounded-lg text-xs flex items-center justify-between">
+            <div>
+              <span class="text-slate-400">591標價:</span>
+              <span class="font-bold text-red-600 ml-1 text-sm">{{ item.t591_price }}萬</span>
+            </div>
+            <div v-if="item.matched_price">
+              <span class="text-slate-400">分店標價:</span>
+              <span class="font-bold text-emerald-600 ml-1 text-sm">{{ item.matched_price }}萬</span>
+            </div>
+            <div v-else class="text-slate-400">
+              分店無此庫存
+            </div>
+          </div>
+
+          <!-- 差異原因詳細說明 -->
+          <div 
+            :class="item.status === 'NORMAL' ? 'text-emerald-700 bg-emerald-50' : 'text-amber-800 bg-amber-50'"
+            class="p-2 rounded-lg text-xs leading-relaxed">
+            <span class="font-semibold">診斷：</span>{{ item.diff_reason }}
+          </div>
+
+          <!-- 連結按鈕 -->
+          <div class="flex gap-2 pt-1">
+            <a 
+              :href="item.t591_url" 
+              target="_blank"
+              class="flex-1 text-center py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50">
+              查看 591 刊登
+            </a>
+            <a 
+              v-if="item.matched_url"
+              :href="item.matched_url" 
+              target="_blank"
+              class="flex-1 text-center py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700">
+              查看永慶分店
+            </a>
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const loading = ref(true);
+        const error = ref(null);
+        const report = ref(null);
+        const items = ref([]);
+        const currentTab = ref('abnormal');
+        const keyword = ref('');
+
+        // 從 URL 取得 report_id 或 shop_id
+        const urlParams = new URLSearchParams(window.location.search);
+        const reportId = urlParams.get('report_id');
+        const shopId = urlParams.get('shop_id') || '12017';
+
+        // Turso 連線資訊 (可替換為唯讀 Token)
+        const TURSO_URL = 'https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io/v2/pipeline';
+        const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw';
+
+        async function queryTurso(sql, args = []) {
+          const stmt = { sql };
+          if (args.length > 0) {
+            stmt.args = args.map(a => {
+              if (typeof a === 'number') return { type: 'integer', value: a.toString() };
+              return { type: 'text', value: a.toString() };
+            });
+          }
+
+          const res = await fetch(TURSO_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${TURSO_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              requests: [
+                { type: 'execute', stmt },
+                { type: 'close' }
+              ]
+            })
+          });
+
+          if (!res.ok) throw new Error(`Turso HTTP Error: ${res.status}`);
+          const data = await res.json();
+          const first = data.results[0];
+          if (first.type === 'error') throw new Error(first.error.message);
+
+          const cols = first.response.result.cols.map(c => c.name);
+          const rows = first.response.result.rows.map(r => {
+            const obj = {};
+            cols.forEach((col, idx) => {
+              const cell = r[idx];
+              obj[col] = cell.value;
+            });
+            return obj;
+          });
+          return rows;
+        }
+
+        async function loadReport() {
+          try {
+            loading.value = true;
+            error.value = null;
+
+            // 1. 取得主報告
+            let rptSql = "SELECT * FROM compare_reports ";
+            let rptArgs = [];
+            if (reportId) {
+              rptSql += "WHERE report_id = ? LIMIT 1;";
+              rptArgs.push(reportId);
+            } else {
+              rptSql += "WHERE shop_id = ? ORDER BY created_at DESC LIMIT 1;";
+              rptArgs.push(shopId);
+            }
+
+            const rptRows = await queryTurso(rptSql, rptArgs);
+            if (rptRows.length === 0) {
+              throw new Error("查無比對報告，請先執行爬蟲與比對程式。");
+            }
+            report.value = rptRows[0];
+
+            // 2. 取得報告明細物件
+            const itemSql = "SELECT * FROM compare_items WHERE report_id = ? ORDER BY status, id;";
+            items.value = await queryTurso(itemSql, [report.value.report_id]);
+
+          } catch (e) {
+            error.value = e.message;
+          } finally {
+            loading.value = false;
+          }
+        }
+
+        const abnormalCount = computed(() => {
+          if (!report.value) return 0;
+          return (parseInt(report.value.not_found_count) || 0) + (parseInt(report.value.price_diff_count) || 0);
+        });
+
+        const tabs = computed(() => [
+          { key: 'abnormal', name: '全部異常', count: abnormalCount.value },
+          { key: 'NOT_FOUND', name: '疑似已下架', count: report.value?.not_found_count || 0 },
+          { key: 'PRICE_MISMATCH', name: '價格不一致', count: report.value?.price_diff_count || 0 },
+          { key: 'SPEC_MISMATCH', name: '規格/屋齡出入', count: report.value?.spec_diff_count || 0 },
+          { key: 'NORMAL', name: '正常在售', count: report.value?.matched_count || 0 },
+          { key: 'all', name: '全部物件', count: items.value.length },
+        ]);
+
+        const filteredItems = computed(() => {
+          return items.value.filter(item => {
+            // Tab 篩選
+            if (currentTab.value === 'abnormal') {
+              if (item.status === 'NORMAL') return false;
+            } else if (currentTab.value !== 'all') {
+              if (item.status !== currentTab.value) return false;
+            }
+
+            // 關鍵字搜尋
+            if (keyword.value.trim()) {
+              const kw = keyword.value.trim().toLowerCase();
+              const matchTitle = (item.t591_title || '').toLowerCase().includes(kw);
+              const matchComm = (item.t591_community || '').toLowerCase().includes(kw);
+              const matchId = (item.t591_id || '').includes(kw);
+              if (!matchTitle && !matchComm && !matchId) return false;
+            }
+
+            return true;
+          });
+        });
+
+        function statusLabel(status) {
+          switch (status) {
+            case 'NORMAL': return '🟢 正常在售';
+            case 'NOT_FOUND': return '🔴 疑似已下架';
+            case 'PRICE_MISMATCH': return '🟡 價格不一致';
+            case 'SPEC_MISMATCH': return '🟠 規格出入';
+            default: return status;
+          }
+        }
+
+        function statusBadgeClass(status) {
+          switch (status) {
+            case 'NORMAL': return 'bg-emerald-100 text-emerald-800';
+            case 'NOT_FOUND': return 'bg-red-100 text-red-800';
+            case 'PRICE_MISMATCH': return 'bg-amber-100 text-amber-800';
+            case 'SPEC_MISMATCH': return 'bg-orange-100 text-orange-800';
+            default: return 'bg-slate-100 text-slate-800';
+          }
+        }
+
+        onMounted(() => {
+          loadReport();
+        });
+
+        return {
+          loading,
+          error,
+          report,
+          items,
+          currentTab,
+          tabs,
+          keyword,
+          filteredItems,
+          abnormalCount,
+          statusLabel,
+          statusBadgeClass
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
