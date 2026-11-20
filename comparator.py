@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
@@ -11,6 +12,15 @@ def get_tw_now() -> datetime:
 
 def get_tw_now_str() -> str:
     return datetime.now(TAIWAN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+def clean_text(s: str) -> str:
+    if not s:
+        return ""
+    # 移除 HTML 標籤
+    s = re.sub(r'<[^>]+>', '', s)
+    # 移除特殊標點符號與多餘空白
+    s = re.sub(r'[\s\-_\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]', '', s)
+    return s.strip()
 
 class InventoryComparator:
     def __init__(self, db_client: Optional[TursoClient] = None):
@@ -45,109 +55,123 @@ class InventoryComparator:
 
         return None
 
-    def calculate_match_score(self, h591: Dict[str, Any], hyc: Dict[str, Any]) -> Tuple[float, List[str]]:
+    def match_house(self, h: Dict[str, Any], yc_list: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], str, str, float]:
         """
-        綜合評估：縣市、區域、路名、社區、總價、樓層、總樓高、屋齡
-        回傳 (匹配分數, 異常原因列表)
-        門檻原則：路名或社區至少需有一個相符，且縣市區域必須一致，否則視為不同物件。
+        兩階段嚴格比對：
+        階段一 (Hard Filters)：
+          - 縣市、行政區嚴格完全相同 (不同就判斷不同物件)
+          - 所在樓層嚴格完全相同 (非透天/整棟需一致；透天整棟相容)
+          - 建物登記坪數容許誤差 <= 1.5 坪
+        階段二 (Difference Diagnostics)：
+          - 總價差 >= 1 萬標註價差
+          - 總樓高出入標註樓高差
+          - 路名出入標註路名差
+          - 若縣市/區域/建坪/樓層/總價/總樓高皆一致，僅路名不同 -> 特別提示：是否是路名有誤 (極少機會 但也有可能)
+        回傳: (best_yc_match, status, reason, confidence_score)
         """
-        score = 0.0
+        c1 = (h.get("county") or "").strip()
+        d1 = (h.get("district") or "").strip()
+        f1 = int(h.get("floor") or 0)
+        a1 = float(h.get("reg_area") or 0.0)
+        p1 = float(h.get("price") or 0.0)
+        allf1 = int(h.get("all_floor") or 0)
+        st1 = (h.get("street") or "").strip()
+        comm1 = clean_text(h.get("community_name") or "")
+        t1 = clean_text(h.get("title") or "")
+
+        # 1. 第一階段：硬性特徵比對
+        candidates = []
+        for y in yc_list:
+            c2 = (y.get("county") or "").strip()
+            d2 = (y.get("district") or "").strip()
+            if c1 != c2 or d1 != d2:
+                continue
+
+            f2 = int(y.get("from_floor") or 0)
+            # 樓層比對 (大樓/公寓嚴格一致；透天/整棟相容 99 與 1)
+            if f1 > 0 and f2 > 0 and f1 != 99:
+                if f1 != f2:
+                    continue
+            elif f1 == 99 and f2 != 99 and f2 != 1:
+                continue
+
+            a2 = float(y.get("reg_area") or 0.0)
+            diff_area = abs(a1 - a2)
+            if diff_area > 1.5:
+                continue
+
+            candidates.append((diff_area, y))
+
+        if not candidates:
+            return None, "NOT_FOUND", "分店目前無此庫存物件 (疑似已成交下架或未在分店刊登)", 0.0
+
+        # 若有多筆符合硬性條件，以 社區/路名吻合度 與 坪數誤差 排序
+        def score_cand(item):
+            diff_a, y = item
+            score = 50.0  # 通過硬性篩選的基本分
+            comm2 = clean_text(y.get("community_name") or "")
+            case2 = clean_text(y.get("case_name") or "")
+            addr2 = (y.get("address") or "").strip()
+
+            if comm1 and comm2 and (comm1 in comm2 or comm2 in comm1):
+                score += 30.0
+            elif comm2 and comm2 in t1:
+                score += 25.0
+
+            if st1 and (st1 in addr2 or st1 in case2):
+                score += 20.0
+
+            score += max(0.0, 10.0 - diff_a * 5)
+            return score
+
+        candidates.sort(key=score_cand, reverse=True)
+        best_diff_a, best_y = candidates[0]
+        confidence = min(100.0, score_cand((best_diff_a, best_y)))
+
+        # 2. 第二階段：細節差異診斷
         anomalies = []
+        p2 = float(best_y.get("price") or 0.0)
+        allf2 = int(best_y.get("up_floor") or 0)
+        addr2 = (best_y.get("address") or "").strip()
+        case2 = (best_y.get("case_name") or "").strip()
 
-        # 1. 縣市與行政區 (必要條件)
-        c591 = (h591.get("county") or "").strip()
-        d591 = (h591.get("district") or "").strip()
-        cyc = (hyc.get("county") or "").strip()
-        dyc = (hyc.get("district") or "").strip()
-
-        if c591 and cyc and c591 != cyc:
-            return 0.0, ["縣市不相符"]
-        if d591 and dyc and d591 != dyc:
-            return 0.0, ["區域不相符"]
-
-        score += 20.0
-
-        # 2. 社區名稱與路名比對 (關鍵辨識：二者至少有一項相符)
-        comm591 = (h591.get("community_name") or "").strip()
-        commyc = (hyc.get("community_name") or "").strip()
-        t591 = (h591.get("title") or "").strip()
-
-        st591 = (h591.get("street") or "").strip()
-        addryc = (hyc.get("address") or "").strip()
-        case_name_yc = (hyc.get("case_name") or "").strip()
-
-        # 社區是否吻合
-        comm_match = False
-        if comm591 and commyc and (comm591 == commyc or comm591 in commyc or commyc in comm591):
-            comm_match = True
-        elif commyc and commyc in t591:
-            comm_match = True
-
-        # 路名是否吻合
-        st_match = False
-        if st591 and (st591 in addryc or st591 in case_name_yc):
-            st_match = True
-
-        # 若路名與社區完全對不上，絕對不可能是同一間房子
-        if not comm_match and not st_match:
-            return 0.0, ["路名與社區皆不相符"]
-
-        if comm_match:
-            score += 35.0
-        if st_match:
-            score += 20.0
-
-        # 3. 坪數比對
-        area591 = float(h591.get("reg_area") or 0.0)
-        areayc = float(hyc.get("reg_area") or 0.0)
-        diff_area = abs(area591 - areayc)
-
-        if diff_area <= 0.3:
-            score += 25.0
-        elif diff_area <= 1.0:
-            score += 15.0
-        elif diff_area > 3.0:
-            score -= 20.0
-            anomalies.append(f"坪數差距過大 (591: {area591}坪 vs 永慶: {areayc}坪，差 {round(diff_area, 1)}坪)")
-
-        # 4. 總價比對 (不扣分，但列為異常指標)
-        p591 = float(h591.get("price") or 0.0)
-        pyc = float(hyc.get("price") or 0.0)
-        diff_price = round(p591 - pyc, 2)
-        if abs(diff_price) >= 1.0:
+        # 總價判斷
+        diff_price = round(p1 - p2, 2)
+        has_price_diff = abs(diff_price) >= 1.0
+        if has_price_diff:
             diff_label = f"永慶便宜 {abs(diff_price)}萬" if diff_price > 0 else f"591便宜 {abs(diff_price)}萬"
-            anomalies.append(f"總價不一致 (591標: {p591}萬 vs 永慶標: {pyc}萬，{diff_label})")
+            anomalies.append(f"總價不一致 (591標: {p1}萬 vs 永慶標: {p2}萬，{diff_label})")
 
-        # 5. 樓層比對
-        f591 = int(h591.get("floor") or 0)
-        f_from_yc = int(hyc.get("from_floor") or 0)
-        if f591 != 99 and f591 > 0 and f_from_yc > 0:
-            if f591 == f_from_yc:
-                score += 10.0
-            else:
-                anomalies.append(f"所在樓層出入 (591標: {f591}樓 vs 永慶標: {f_from_yc}樓)")
+        # 總樓高判斷
+        has_allf_diff = False
+        if allf1 > 0 and allf2 > 0 and allf1 != allf2:
+            has_allf_diff = True
+            anomalies.append(f"總樓高出入 (591標: {allf1}樓高 vs 永慶標: {allf2}樓高)")
 
-        # 6. 總樓高比對
-        allf591 = int(h591.get("all_floor") or 0)
-        up_yc = int(hyc.get("up_floor") or 0)
-        if allf591 > 0 and up_yc > 0:
-            if allf591 == up_yc:
-                score += 10.0
-            else:
-                anomalies.append(f"總樓高出入 (591標: {allf591}樓高 vs 永慶標: {up_yc}樓高)")
+        # 路名判斷
+        has_street_diff = False
+        if st1 and (st1 not in addr2 and st1 not in case2):
+            has_street_diff = True
+            anomalies.append(f"路名出入 (591:「{st1}」 vs 永慶地址:「{addr2}」)")
 
-        # 7. 屋齡比對
-        age591 = float(h591.get("house_age") or 0.0)
-        ageyc = float(hyc.get("build_age") or 0.0)
-        if age591 > 0 and ageyc > 0:
-            diff_age = abs(age591 - ageyc)
-            if diff_age <= 1.5:
-                score += 10.0
-            elif diff_age > 3.0:
-                anomalies.append(f"屋齡差距過大 (591: {age591}年 vs 永慶: {round(ageyc, 1)}年，差 {round(diff_age, 1)}年)")
+        # 特殊判斷：縣市區域、建坪、樓層、總價、總樓高都一樣，只有路名不同
+        if not has_price_diff and not has_allf_diff and has_street_diff:
+            status = "SPEC_MISMATCH"
+            reason = f"💡 提示：是否是路名有誤 (極少機會 但也有可能)（縣市/區域/樓層/建坪/總價({p1}萬)/總樓高皆一致，僅路名 591「{st1}」vs 永慶「{addr2}」不同）"
+            return best_y, status, reason, confidence
 
-        final_score = max(0.0, min(100.0, score))
-        return final_score, anomalies
+        if has_price_diff:
+            status = "PRICE_MISMATCH"
+            reason = "；".join(anomalies)
+        elif anomalies:
+            status = "SPEC_MISMATCH"
+            reason = "；".join(anomalies)
+        else:
+            status = "NORMAL"
+            f_disp = f"{f1}樓" if f1 != 99 else "整棟"
+            reason = f"正常在售：縣市/區域/路名相符，總價({p1}萬)、樓層({f_disp})、建坪({a1}坪)、總高皆一致"
+
+        return best_y, status, reason, confidence
 
     def run_comparison(self, shop_id: str, shop_url: str = "", user_id: str = "") -> str:
         # 1. 檢查 1 分鐘內快取
@@ -157,7 +181,6 @@ class InventoryComparator:
 
         report_id = f"rpt_{shop_id}_{get_tw_now().strftime('%Y%m%d_%H%M%S')}"
         now_str = get_tw_now_str()
-
         print(f"\n================ 開始比對 591 店鋪 {shop_id} 庫存 ================")
 
         # 取得 591 物件清單
@@ -182,8 +205,6 @@ class InventoryComparator:
         report_items = []
 
         for h in h591_list:
-            county = h.get("county") or ""
-            district = h.get("district") or ""
             p591 = float(h.get("price") or 0.0)
             hid = h.get("house_id")
             title = h.get("title") or ""
@@ -193,63 +214,33 @@ class InventoryComparator:
             cover591 = h.get("cover") or ""
             url591 = f"https://sale.591.com.tw/sale-detail-{hid}.html"
 
-            # 縮小候選比對範圍
-            candidates = [
-                y for y in yc_list 
-                if (county in y.get("county", "") or not county) and (district in y.get("district", "") or not district)
-            ]
-            if not candidates:
-                candidates = yc_list
+            best_match, status, reason, confidence = self.match_house(h, yc_list)
 
-            best_match = None
-            best_score = 0.0
-            best_anomalies = []
+            if status == "NORMAL":
+                matched_count += 1
+            elif status == "PRICE_MISMATCH":
+                price_diff_count += 1
+            elif status == "SPEC_MISMATCH":
+                spec_diff_count += 1
+            else:
+                not_found_count += 1
 
-            for cand in candidates:
-                score, anomalies = self.calculate_match_score(h, cand)
-                if score > best_score:
-                    best_score = score
-                    best_match = cand
-                    best_anomalies = anomalies
-
-            # 判定匹配門檻 (60 分以上且路名/社區吻合視為同一物件)
-            if best_match and best_score >= 60.0:
+            if best_match:
                 pyc = float(best_match.get("price") or 0.0)
                 sid = best_match.get("case_sid")
                 b_name = best_match.get("branch_name") or best_match.get("branch_id")
                 b_url = f"https://buy.yungching.com.tw/house/{sid}"
 
-                if best_anomalies:
-                    # 存在一項或多項差距過大
-                    has_price_diff = any("總價不一致" in a for a in best_anomalies)
-                    if has_price_diff:
-                        status = "PRICE_MISMATCH"
-                        price_diff_count += 1
-                    else:
-                        status = "SPEC_MISMATCH"
-                        spec_diff_count += 1
-
-                    reason = "；".join(best_anomalies)
-                else:
-                    status = "NORMAL"
-                    matched_count += 1
-                    reason = f"正常在售：縣市/區域/路名相符，總價({p591}萬)、樓層、總高、屋齡皆一致"
-
                 report_items.append((
                     report_id, shop_id, hid, title, p591, area591, f591_str, comm591, cover591, url591,
                     sid, best_match.get("branch_id"), b_name, pyc, b_url,
-                    status, reason, best_score, now_str
+                    status, reason, confidence, now_str
                 ))
             else:
-                # 查無相符物件 -> 標註下架
-                status = "NOT_FOUND"
-                not_found_count += 1
-                reason = "分店目前無此庫存物件 (疑似已成交下架或未在分店刊登)"
-
                 report_items.append((
                     report_id, shop_id, hid, title, p591, area591, f591_str, comm591, cover591, url591,
                     None, None, None, None, None,
-                    status, reason, best_score, now_str
+                    status, reason, confidence, now_str
                 ))
 
         # 儲存報告主表 (記錄 shop_url 與 user_id)
@@ -295,4 +286,4 @@ class InventoryComparator:
 
 if __name__ == "__main__":
     comparator = InventoryComparator()
-    comparator.run_comparison("12017")
+    comparator.run_comparison("32192")

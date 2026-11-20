@@ -1,9 +1,20 @@
 import os
+import re
 import json
 import time
 import requests
 from datetime import datetime
 from turso_client import TursoClient
+
+def parse_taiwan_address(raw_addr: str) -> tuple:
+    if not raw_addr:
+        return "", "", ""
+    m = re.match(r'^(.*?([縣市]))(.*?([區鄉鎮市]))(.*)$', raw_addr)
+    if m:
+        return m.group(1).strip(), m.group(3).strip(), m.group(5).strip()
+    county = raw_addr[:3] if len(raw_addr) >= 3 else ""
+    district = raw_addr[3:6] if len(raw_addr) >= 6 else ""
+    return county, district, raw_addr[6:]
 
 class YungchingBranchSyncer:
     BASE_DOMAIN = "https://shop.yungching.com.tw"
@@ -165,9 +176,7 @@ class YungchingBranchSyncer:
             
             # 地址拆分縣市行政區
             raw_addr = h.get("address", "")
-            # 優先從 address 前 3 碼取縣市
-            county = raw_addr[:3] if len(raw_addr) >= 3 else ""
-            district = raw_addr[3:6] if len(raw_addr) >= 6 else ""
+            county, district, _ = parse_taiwan_address(raw_addr)
 
             pin = h.get("pinInfo") or {}
             fl = h.get("floorInfo") or {}

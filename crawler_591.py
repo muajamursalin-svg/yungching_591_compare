@@ -168,7 +168,7 @@ class T591ShopCrawler:
                 h.get("regionname") or "",
                 h.get("sectionname") or "",
                 h.get("street_name") or "",
-                h.get("cases_name", "").strip(),
+                re.sub(r'<[^>]+>', '', h.get("cases_name") or "").strip(),
                 h.get("kind_name") or "",
                 shape,
                 age_val,
