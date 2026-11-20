@@ -194,14 +194,15 @@
         const currentTab = ref('abnormal');
         const keyword = ref('');
 
-        // 從 URL 取得 report_id 或 shop_id
+        // 從 URL 取得 report_id 或 shop_id，以及可選的 API 來源
         const urlParams = new URLSearchParams(window.location.search);
         const reportId = urlParams.get('report_id');
         const shopId = urlParams.get('shop_id') || '12017';
+        const customToken = urlParams.get('token');
 
-        // Turso 連線資訊 (可替換為唯讀 Token)
+        // Turso 連線資訊 (建議使用唯讀 Token，或由 URL / GAS 代理帶入)
         const TURSO_URL = 'https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io/v2/pipeline';
-        const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw';
+        const TURSO_TOKEN = customToken || window.TURSO_READONLY_TOKEN || '';
 
         async function queryTurso(sql, args = []) {
           const stmt = { sql };
@@ -248,7 +249,22 @@
             loading.value = true;
             error.value = null;
 
-            // 1. 取得主報告
+            const gasUrl = urlParams.get('gas_url');
+            if (gasUrl) {
+              // 透過 GAS 安全代理讀取 (免 Token)
+              let fetchUrl = `${gasUrl}?action=get_report`;
+              if (reportId) fetchUrl += `&report_id=${encodeURIComponent(reportId)}`;
+              else fetchUrl += `&shop_id=${encodeURIComponent(shopId)}`;
+
+              const res = await fetch(fetchUrl);
+              const data = await res.json();
+              if (data.error) throw new Error(data.error);
+              report.value = data.report;
+              items.value = data.items;
+              return;
+            }
+
+            // 直接透過 Turso 讀取
             let rptSql = "SELECT * FROM compare_reports ";
             let rptArgs = [];
             if (reportId) {
@@ -265,7 +281,6 @@
             }
             report.value = rptRows[0];
 
-            // 2. 取得報告明細物件
             const itemSql = "SELECT * FROM compare_items WHERE report_id = ? ORDER BY status, id;";
             items.value = await queryTurso(itemSql, [report.value.report_id]);
 

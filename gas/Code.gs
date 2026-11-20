@@ -14,6 +14,87 @@
  * 4. 將取得的 Web App URL 填入 LINE Developers Console 的 Webhook URL 並開啟 Use Webhook。
  */
 
+/**
+ * 提供 LIFF 前端透過 HTTP GET 安全讀取比對報告 (無需將 Turso Token 暴露於前端)
+ */
+function doGet(e) {
+  try {
+    const action = e.parameter.action;
+    const reportId = e.parameter.report_id;
+    const shopId = e.parameter.shop_id || "12017";
+
+    const scriptProps = PropertiesService.getScriptProperties();
+    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL");
+    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN");
+
+    if (!tursoUrl || !tursoToken) {
+      return ContentService.createTextOutput(JSON.stringify({ error: "Missing Turso config" })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+
+    // 1. 查詢主報告
+    let rptSql = "SELECT * FROM compare_reports ";
+    let rptArgs = [];
+    if (reportId) {
+      rptSql += "WHERE report_id = ? LIMIT 1;";
+      rptArgs.push({ type: "text", value: reportId });
+    } else {
+      rptSql += "WHERE shop_id = ? ORDER BY created_at DESC LIMIT 1;";
+      rptArgs.push({ type: "text", value: shopId });
+    }
+
+    const res1 = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: rptSql, args: rptArgs } }, { type: "close" }] }),
+      muteHttpExceptions: true
+    });
+
+    const data1 = JSON.parse(res1.getContentText());
+    const rptResult = data1.results[0]?.response?.result;
+    if (!rptResult || !rptResult.rows || rptResult.rows.length === 0) {
+      return ContentService.createTextOutput(JSON.stringify({ error: "Report not found" })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const rptCols = rptResult.cols.map(c => c.name);
+    const reportObj = {};
+    rptCols.forEach((col, idx) => { reportObj[col] = rptResult.rows[0][idx].value; });
+
+    // 2. 查詢報告明細項
+    const itemSql = "SELECT * FROM compare_items WHERE report_id = ? ORDER BY status, id;";
+    const res2 = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify({ requests: [{ type: "execute", stmt: { sql: itemSql, args: [{ type: "text", value: reportObj.report_id }] } }, { type: "close" }] }),
+      muteHttpExceptions: true
+    });
+
+    const data2 = JSON.parse(res2.getContentText());
+    const itemResult = data2.results[0]?.response?.result;
+    const items = [];
+    if (itemResult && itemResult.rows) {
+      const itemCols = itemResult.cols.map(c => c.name);
+      itemResult.rows.forEach(r => {
+        const itemObj = {};
+        itemCols.forEach((col, idx) => { itemObj[col] = r[idx].value; });
+        items.push(itemObj);
+      });
+    }
+
+    const output = {
+      status: "success",
+      report: reportObj,
+      items: items
+    };
+
+    return ContentService.createTextOutput(JSON.stringify(output)).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
