@@ -59,8 +59,9 @@ class RakuyaShopCrawler:
 
         raise ValueError(f"無法解析樂屋網店鋪代號或網址: {input_str}")
 
-    def fetch_page_html(self, shop_id: str, page: int = 1) -> str:
-        url = f"{self.BASE_URL}/{shop_id}/sell?page={page}&sort=11#total"
+    def fetch_page_html(self, shop_id: str, page: int = 1, sort: str = "21") -> str:
+        # 使用 sort=21 (總價由高至低) 作為穩定排序，徹底避免 sort=11 (更新時間) 在分頁爬取過程中因時間戳記變動導致的「分頁排序漂移」
+        url = f"{self.BASE_URL}/{shop_id}/sell?page={page}&sort={sort}#total"
         res = requests.get(url, impersonate="chrome124", timeout=self.timeout)
         if res.status_code != 200:
             raise RuntimeError(f"樂屋網請求失敗 (HTTP {res.status_code}): {url}")
@@ -100,9 +101,17 @@ class RakuyaShopCrawler:
 
     def parse_houses_from_html(self, html: str, shop_id: str, seen_ehids: set) -> List[Dict[str, Any]]:
         houses = []
+        # 精準鎖定全部物件區塊 (自 <A name="total"> 至 class="pagination")，避開上方店長推薦/人氣輪播干擾，並以 |$ 確保最後一筆卡片完整截取
+        if 'name="total"' in html:
+            tot_html = html.split('name="total"')[-1].split('class="pagination"')[0]
+        elif 'class="pagination"' in html:
+            tot_html = html.split('class="pagination"')[0]
+        else:
+            tot_html = html
+
         items = re.findall(
-            r'<div class="obj-item clearfix">([\s\S]*?)(?=<div class="obj-item clearfix">|<div class="pagination">|<footer|<div class="block-page">)',
-            html
+            r'<div class="obj-item clearfix">([\s\S]*?)(?=<div class="obj-item clearfix">|$)',
+            tot_html
         )
 
         for raw_item in items:
