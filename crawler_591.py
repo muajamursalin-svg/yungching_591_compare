@@ -1,9 +1,10 @@
+from __future__ import annotations
 import re
 import json
 import time
 import requests
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
 
 TAIWAN_TZ = timezone(timedelta(hours=8))

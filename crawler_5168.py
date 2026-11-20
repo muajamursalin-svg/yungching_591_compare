@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """
 5168 實價登錄比價王 - 房仲店鋪底層純 API 爬取模組
 完全不使用任何 DOM 解析，直接對接 5168 Web Service

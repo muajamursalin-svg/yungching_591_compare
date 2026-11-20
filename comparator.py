@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """
 通用房仲庫存比對核心模組 (Unified Multi-Platform Inventory Comparator)
 支援 591、5168、樂屋網 等任意平台庫存與永慶多加盟店在庫物件之精準特徵比對。

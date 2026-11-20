@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 """
 GitHub Actions 觸發之跨平台店鋪比對執行入口 (Multi-Platform Compare Task Runner)
 支援 591、5168 及未來擴充平台之自動識別、爬取、特徵比對與 LINE 推播通知
@@ -6,6 +7,7 @@ GitHub Actions 觸發之跨平台店鋪比對執行入口 (Multi-Platform Compar
 
 import os
 import sys
+import json
 import requests
 from crawler_591 import T591ShopCrawler
 from crawler_5168 import HousePrice5168Crawler
@@ -54,17 +56,45 @@ def send_line_push_notification(user_id: str, message: str, liff_url: str = ""):
         print(f"[Error] 發送 LINE 推播發生錯誤: {e}")
 
 def main():
-    shop_input = os.environ.get("SHOP_INPUT")
+    payload = {}
+    raw_payload = os.environ.get("EVENT_PAYLOAD")
+    if raw_payload:
+        try:
+            payload = json.loads(raw_payload) or {}
+        except Exception as e:
+            print(f"[Warn] 解析 EVENT_PAYLOAD 失敗: {e}")
+
+    inputs = {}
+    raw_inputs = os.environ.get("WORKFLOW_INPUTS")
+    if raw_inputs:
+        try:
+            inputs = json.loads(raw_inputs) or {}
+        except Exception as e:
+            print(f"[Warn] 解析 WORKFLOW_INPUTS 失敗: {e}")
+
+    # 優先從 JSON payload 取得乾淨的 shop_url 或 shop_id，避免 GitHub Actions 表達式強制轉為 'true'
+    shop_input = (
+        payload.get("shop_url") or 
+        payload.get("shop_id") or 
+        inputs.get("shop_id") or 
+        os.environ.get("SHOP_INPUT")
+    )
     if not shop_input and len(sys.argv) > 1:
         shop_input = sys.argv[1]
 
-    if not shop_input:
-        print("[Error] 缺少 SHOP_INPUT 參數。")
+    if not shop_input or shop_input == "true":
+        print(f"[Error] 無效的 SHOP_INPUT 參數: {shop_input}")
         sys.exit(1)
 
-    user_id = os.environ.get("USER_ID", "")
+    user_id = (
+        payload.get("user_id") or 
+        inputs.get("user_id") or 
+        os.environ.get("USER_ID", "")
+    )
     liff_base = os.environ.get("LIFF_URL", "")
-    shop_url = os.environ.get("SHOP_URL") or shop_input
+    shop_url = payload.get("shop_url") or os.environ.get("SHOP_URL") or shop_input
+    if shop_url == "true":
+        shop_url = shop_input
 
     platform = detect_platform(shop_input)
     print(f"[*] 偵測到目標平台: {platform} (輸入: {shop_input})")
