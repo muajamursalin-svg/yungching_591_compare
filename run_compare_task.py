@@ -23,52 +23,108 @@ def detect_platform(input_str: str) -> str:
         return "rakuya"
     return "591"
 
-def build_line_quick_reply(db_client: TursoClient, user_id: str) -> Optional[dict]:
-    if not db_client or not user_id:
-        return None
-    try:
-        rows = db_client.execute("SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;", [user_id])
-        if not rows:
-            return None
-        r = rows[0]
-        items = []
-        if r.get("url_591"):
-            cnt = r.get("count_591") or 0
-            items.append({
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": f"🔍 查 591 ({cnt}次)",
-                    "text": r.get("url_591")
-                }
-            })
-        if r.get("url_5168"):
-            cnt = r.get("count_5168") or 0
-            items.append({
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": f"🔍 查 5168 ({cnt}次)",
-                    "text": r.get("url_5168")
-                }
-            })
-        if r.get("url_rakuya"):
-            cnt = r.get("count_rakuya") or 0
-            items.append({
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": f"🔍 查 樂屋網 ({cnt}次)",
-                    "text": r.get("url_rakuya")
-                }
-            })
-        if items:
-            return {"items": items}
-    except Exception as e:
-        print(f"[Warn] 產生 Quick Reply 失敗: {e}")
-    return None
+def build_interactive_message(db_client: Optional[TursoClient], user_id: str, message: str, liff_url: str = "") -> dict:
+    """產生包含店鋪查詢按鈕與 LIFF 連結的 Flex Message 互動式卡片 (相容 PC 與手機)"""
+    buttons = []
+    quick_items = []
+    
+    if db_client and user_id:
+        try:
+            rows = db_client.execute("SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;", [user_id])
+            if rows:
+                r = rows[0]
+                if r.get("url_591"):
+                    cnt = r.get("count_591") or 0
+                    lbl = f"🔍 查 591 ({cnt}次)"
+                    txt = r.get("url_591")
+                    buttons.append({
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#ff7700",
+                        "height": "sm",
+                        "action": {"type": "message", "label": lbl, "text": txt}
+                    })
+                    quick_items.append({"type": "action", "action": {"type": "message", "label": lbl, "text": txt}})
+                
+                if r.get("url_5168"):
+                    cnt = r.get("count_5168") or 0
+                    lbl = f"🔍 查 5168 ({cnt}次)"
+                    txt = r.get("url_5168")
+                    buttons.append({
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#0084ff",
+                        "height": "sm",
+                        "action": {"type": "message", "label": lbl, "text": txt}
+                    })
+                    quick_items.append({"type": "action", "action": {"type": "message", "label": lbl, "text": txt}})
 
-def send_line_push_notification(user_id: str, message: str, liff_url: str = "", quick_reply: Optional[dict] = None):
+                if r.get("url_rakuya"):
+                    cnt = r.get("count_rakuya") or 0
+                    lbl = f"🔍 查 樂屋網 ({cnt}次)"
+                    txt = r.get("url_rakuya")
+                    buttons.append({
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#e60012",
+                        "height": "sm",
+                        "action": {"type": "message", "label": lbl, "text": txt}
+                    })
+                    quick_items.append({"type": "action", "action": {"type": "message", "label": lbl, "text": txt}})
+        except Exception as e:
+            print(f"[Warn] 查詢已存店鋪按鈕失敗: {e}")
+
+    if liff_url:
+        buttons.append({
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            "action": {"type": "uri", "label": "📊 開啟 LIFF 儀表板", "uri": liff_url}
+        })
+
+    if not buttons:
+        res_msg = {"type": "text", "text": message}
+        if liff_url:
+            res_msg["text"] += f"\n\n📊 點擊開啟 LIFF 比對儀表板：\n{liff_url}"
+        return res_msg
+
+    alt_text = message.split("\n")[0] if message else "店鋪比對報告"
+    if len(alt_text) > 40:
+        alt_text = alt_text[:37] + "..."
+
+    flex_msg = {
+        "type": "flex",
+        "altText": alt_text,
+        "contents": {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": message,
+                        "size": "sm",
+                        "wrap": True,
+                        "lineSpacing": "4px"
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": buttons
+            }
+        }
+    }
+
+    if quick_items:
+        flex_msg["quickReply"] = {"items": quick_items}
+
+    return flex_msg
+
+def send_line_push_notification(user_id: str, message: str, liff_url: str = "", db_client: Optional[TursoClient] = None):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not token or not user_id:
         print("[Notice] 未設定 LINE_CHANNEL_ACCESS_TOKEN 或無 USER_ID，略過推播發送。")
@@ -80,20 +136,11 @@ def send_line_push_notification(user_id: str, message: str, liff_url: str = "", 
         "Authorization": f"Bearer {token}"
     }
 
-    messages = [{"type": "text", "text": message}]
-    if liff_url:
-        messages.append({
-            "type": "text",
-            "text": f"📊 點擊開啟 LIFF 比對儀表板：\n{liff_url}"
-        })
-
-    # 若有 Quick Reply 按鈕，附加在最後一則訊息上
-    if quick_reply and quick_reply.get("items"):
-        messages[-1]["quickReply"] = quick_reply
+    msg_obj = build_interactive_message(db_client, user_id, message, liff_url)
 
     payload = {
         "to": user_id,
-        "messages": messages
+        "messages": [msg_obj]
     }
 
     try:
@@ -170,7 +217,7 @@ def main():
     if sync_lock:
         lock_msg = sync_lock.get("message") or "目前刷新分店庫存中 請五分鐘後再查詢"
         print(f"[Notice] 系統正在刷新永慶分店庫存中，暫停比對任務: {lock_msg}")
-        send_line_push_notification(user_id, f"⚠️ {lock_msg}")
+        send_line_push_notification(user_id, f"⚠️ {lock_msg}", db_client=db)
         release_user_query_lock(db, user_id)
         return
 
@@ -209,8 +256,7 @@ def main():
             f"  • 規格/樓層/屋齡出入: {spec_diff} 件"
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
-        qr = build_line_quick_reply(db, user_id)
-        send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
+        send_line_push_notification(user_id, summary_msg, liff_url=liff_target_url, db_client=db)
         release_user_query_lock(db, user_id)
         return
 
@@ -255,8 +301,7 @@ def main():
             f"  • 規格/樓層/屋齡出入: {spec_diff} 件"
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
-        qr = build_line_quick_reply(db, user_id)
-        send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
+        send_line_push_notification(user_id, summary_msg, liff_url=liff_target_url, db_client=db)
         release_user_query_lock(db, user_id)
 
 if __name__ == "__main__":
@@ -275,15 +320,20 @@ if __name__ == "__main__":
             inputs = json.loads(raw_inputs) if raw_inputs else {}
             user_id = payload.get("user_id") or inputs.get("user_id") or os.environ.get("USER_ID", "")
             if user_id:
-                send_line_push_notification(
-                    user_id,
-                    f"⚠️ 店鋪比對執行異常：\n{str(e)}\n\n請檢查店鋪網址或稍後再試。"
-                )
                 try:
                     db_fallback = TursoClient()
-                    release_user_query_lock(db_fallback, user_id)
                 except Exception:
-                    pass
+                    db_fallback = None
+                send_line_push_notification(
+                    user_id,
+                    f"⚠️ 店鋪比對執行異常：\n{str(e)}\n\n請檢查店鋪網址或稍後再試。",
+                    db_client=db_fallback
+                )
+                if db_fallback:
+                    try:
+                        release_user_query_lock(db_fallback, user_id)
+                    except Exception:
+                        pass
         except Exception as notify_err:
             print(f"[Warn] 發送失敗推播失敗: {notify_err}")
         sys.exit(1)

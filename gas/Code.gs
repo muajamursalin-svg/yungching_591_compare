@@ -25,8 +25,8 @@ function doGet(e) {
     const shopId = e.parameter.shop_id || "12017";
 
     const scriptProps = PropertiesService.getScriptProperties();
-    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL");
-    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN");
+    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL") || "https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io";
+    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN") || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw";
 
     if (!tursoUrl || !tursoToken) {
       return ContentService.createTextOutput(JSON.stringify({ error: "Missing Turso config" })).setMimeType(ContentService.MimeType.JSON);
@@ -110,10 +110,10 @@ function doPost(e) {
     const scriptProps = PropertiesService.getScriptProperties();
     const lineToken = scriptProps.getProperty("LINE_CHANNEL_ACCESS_TOKEN");
     const githubToken = scriptProps.getProperty("GITHUB_TOKEN");
-    const githubRepo = scriptProps.getProperty("GITHUB_REPO");
-    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL");
-    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN");
-    const liffUrl = scriptProps.getProperty("LIFF_URL") || "";
+    const githubRepo = scriptProps.getProperty("GITHUB_REPO") || "muajamursalin-svg/yungching_591_compare";
+    const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL") || "https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io";
+    const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN") || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw";
+    const liffUrl = scriptProps.getProperty("LIFF_URL") || "https://muajamursalin-svg.github.io/yungching_591_compare/";
 
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
@@ -278,9 +278,9 @@ function doPost(e) {
               `⚠️ 異常物件: ${abnormal} 件\n` +
               `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
               `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
-              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件\n\n` +
-              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : ""),
-              qr
+              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件`,
+              userShops,
+              targetLiff
             );
             continue;
           }
@@ -429,9 +429,9 @@ function doPost(e) {
               `⚠️ 異常物件: ${abnormal} 件\n` +
               `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
               `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
-              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件\n\n` +
-              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : ""),
-              qr
+              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件`,
+              userShops,
+              targetLiff
             );
             continue;
           }
@@ -896,15 +896,173 @@ function triggerGitHubActions(repo, token, shopId, shopUrl, userId, platform) {
 }
 
 /**
- * LINE Messaging API 回覆訊息 (支援附加 Quick Reply 按鈕)
+ * 建立互動式訊息卡片 (支援電腦端 PC 與手機端，卡片內部跟隨實體按鈕，同時支援底部 Quick Reply)
  */
-function replyLineMessage(token, replyToken, text, quickReply) {
+function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
+  const buttons = [];
+  const quickItems = [];
+
+  // 1. 若有特定情境按鈕 (例如確認更新/單次比對/取消)
+  if (customButtons && customButtons.length > 0) {
+    customButtons.forEach(btn => {
+      buttons.push({
+        type: "button",
+        style: btn.style || "primary",
+        color: btn.color || "#06c755",
+        height: "sm",
+        action: btn.action
+      });
+      quickItems.push({
+        type: "action",
+        action: btn.action
+      });
+    });
+  } else if (userShops) {
+    // 2. 依照使用者已綁定平台動態產生
+    if (userShops.url_591) {
+      const cnt = userShops.count_591 || 0;
+      const lbl = `🔍 查 591 (${cnt}次)`;
+      const txt = userShops.url_591;
+      buttons.push({
+        type: "button",
+        style: "primary",
+        color: "#ff7700",
+        height: "sm",
+        action: { type: "message", label: lbl, text: txt }
+      });
+      quickItems.push({
+        type: "action",
+        action: { type: "message", label: lbl, text: txt }
+      });
+    }
+
+    if (userShops.url_5168) {
+      const cnt = userShops.count_5168 || 0;
+      const lbl = `🔍 查 5168 (${cnt}次)`;
+      const txt = userShops.url_5168;
+      buttons.push({
+        type: "button",
+        style: "primary",
+        color: "#0084ff",
+        height: "sm",
+        action: { type: "message", label: lbl, text: txt }
+      });
+      quickItems.push({
+        type: "action",
+        action: { type: "message", label: lbl, text: txt }
+      });
+    }
+
+    if (userShops.url_rakuya) {
+      const cnt = userShops.count_rakuya || 0;
+      const lbl = `🔍 查 樂屋網 (${cnt}次)`;
+      const txt = userShops.url_rakuya;
+      buttons.push({
+        type: "button",
+        style: "primary",
+        color: "#e60012",
+        height: "sm",
+        action: { type: "message", label: lbl, text: txt }
+      });
+      quickItems.push({
+        type: "action",
+        action: { type: "message", label: lbl, text: txt }
+      });
+    }
+
+    if (liffUrl) {
+      buttons.push({
+        type: "button",
+        style: "secondary",
+        height: "sm",
+        action: {
+          type: "uri",
+          label: "📊 開啟 LIFF 儀表板",
+          uri: liffUrl
+        }
+      });
+    }
+  }
+
+  // 若完全沒有任何按鈕，退回一般文字訊息
+  if (buttons.length === 0) {
+    return { type: "text", text: text };
+  }
+
+  // 摘要標題用於推播與無障礙視窗
+  const altText = (text.split("\n")[0] || "比對助理回覆").substring(0, 38);
+
+  const flexMsg = {
+    type: "flex",
+    altText: altText,
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "text",
+            text: text,
+            size: "sm",
+            wrap: true,
+            lineSpacing: "4px"
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: buttons
+      }
+    }
+  };
+
+  if (quickItems.length > 0) {
+    flexMsg.quickReply = { items: quickItems };
+  }
+
+  return flexMsg;
+}
+
+/**
+ * LINE Messaging API 回覆訊息 (全面支援 Flex 訊息卡片 + 實體按鈕 + 底部 Quick Reply)
+ */
+function replyLineMessage(token, replyToken, text, userShops, liffUrl, customButtons) {
   if (!token) return;
   const url = "https://api.line.me/v2/bot/message/reply";
-  const msgObj = { type: "text", text: text };
-  if (quickReply && quickReply.items && quickReply.items.length > 0) {
-    msgObj.quickReply = quickReply;
+
+  // 若傳入的是包含 items 的 Quick Reply 物件，自動轉為實體按鈕 (自帶平台專屬色彩)
+  if (userShops && userShops.items && Array.isArray(userShops.items)) {
+    customButtons = userShops.items.map(item => {
+      let color = undefined;
+      let style = "primary";
+      const lbl = item.action?.label || "";
+      const dataStr = item.action?.data || "";
+      if (lbl.indexOf("591") !== -1) {
+        color = "#ff7700";
+      } else if (lbl.indexOf("5168") !== -1) {
+        color = "#0084ff";
+      } else if (lbl.indexOf("樂屋網") !== -1) {
+        color = "#e60012";
+      } else if (dataStr.indexOf("update_shop") !== -1) {
+        color = "#06c755";
+      } else if (dataStr.indexOf("once_compare") !== -1) {
+        color = "#3b82f6";
+      } else {
+        style = "secondary";
+      }
+      return {
+        style: style,
+        color: color,
+        action: item.action
+      };
+    });
+    userShops = null;
   }
+
+  const msgObj = buildInteractiveMessage(text, userShops, liffUrl, customButtons);
 
   const payload = {
     replyToken: replyToken,
@@ -921,7 +1079,8 @@ function replyLineMessage(token, replyToken, text, quickReply) {
     muteHttpExceptions: true
   };
 
-  UrlFetchApp.fetch(url, options);
+  const res = UrlFetchApp.fetch(url, options);
+  console.log("LINE Reply Status: " + res.getResponseCode());
 }
 
 // ───────────────────────────────────────────────
