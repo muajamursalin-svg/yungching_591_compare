@@ -514,6 +514,36 @@
           );
         }
 
+        // 判斷兩筆廣告是否為同一個物件 (支援重複刊登、換標題、小數點容錯)
+        function isSameProperty(a, b) {
+          if (!a || !b) return false;
+          if (a.id === b.id) return true;
+          if (generateFingerprint(a) === generateFingerprint(b)) return true;
+
+          const isLandA = isLandItem(a);
+          const isLandB = isLandItem(b);
+          if (isLandA !== isLandB) return false;
+
+          const clean = s => (s || '').replace(/[\s\-_\\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]/g, '').replace(/臺/g, '台').toLowerCase();
+          const addrA = clean(a.t591_address || '');
+          const addrB = clean(b.t591_address || '');
+
+          if (isLandA) {
+            // 土地比對：同地址/段名且地坪差距 <= 1.5 坪
+            const areaDiff = Math.abs((parseFloat(a.t591_area) || 0) - (parseFloat(b.t591_area) || 0));
+            return (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA))) && (areaDiff <= 1.5);
+          } else {
+            // 成屋比對：同地址、同樓層且建坪差距 <= 1.0 坪
+            const fA = String(a.t591_floor || '').trim();
+            const fB = String(b.t591_floor || '').trim();
+            const sameFloor = (fA === fB) || (fA.includes('整棟') && fB.includes('整棟'));
+            if (!sameFloor) return false;
+
+            const areaDiff = Math.abs((parseFloat(a.t591_area) || 0) - (parseFloat(b.t591_area) || 0));
+            return (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA))) && (areaDiff <= 1.0);
+          }
+        }
+
         // 生成跨平台物件唯一指紋 (支援房屋與土地)
         function generateFingerprint(item) {
           let addr = (item.t591_address || '').replace(/臺/g, '台');
@@ -588,6 +618,11 @@
               }
             }
 
+            // 找出當前報告中所有相同物業的刊登物件 (包含本筆與重複刊登之他筆)
+            const matchedItems = items.value.filter(it => isSameProperty(item, it));
+            const matchedIds = matchedItems.map(it => it.id);
+            const countToChange = matchedItems.filter(it => it.status !== 'INTERNAL_ACTIVE').length;
+
             // 1. 寫入或更新 internal_active_houses 表
             const upsertSql = `
               INSERT INTO internal_active_houses (
@@ -605,25 +640,28 @@
               '店頭同仁', 'I智慧確認', '確認物件存在於I智慧內部', nowStr, nowStr
             ]);
 
-            // 2. 更新 compare_items 本身狀態
+            // 2. 批次更新 compare_items 表中所有相同的刊登物件
             const typeLabel = isLand ? '土地物件' : '在庫物件';
             const newReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 查驗狀態：確認物件存在於I智慧內部 (${typeLabel})\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁確認已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。`;
 
-            const updateItemSql = "UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = 'I智慧確認' WHERE id = ?;";
-            await queryTurso(updateItemSql, [newReason, item.id]);
+            const placeholders = matchedIds.map(() => '?').join(',');
+            const updateItemSql = `UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = 'I智慧確認' WHERE id IN (${placeholders});`;
+            await queryTurso(updateItemSql, [newReason, ...matchedIds]);
 
-            // 3. 更新 compare_reports 計數
-            if (report.value && report.value.report_id) {
+            // 3. 更新 compare_reports 計數 (依實際受影響的筆數精準增減)
+            if (report.value && report.value.report_id && countToChange > 0) {
               await queryTurso(
-                "UPDATE compare_reports SET not_found_count = MAX(0, not_found_count - 1), internal_active_count = internal_active_count + 1 WHERE report_id = ?;",
-                [report.value.report_id]
+                "UPDATE compare_reports SET not_found_count = MAX(0, not_found_count - ?), internal_active_count = internal_active_count + ? WHERE report_id = ?;",
+                [countToChange, countToChange, report.value.report_id]
               );
             }
 
-            // 4. 即時更新本機 Vue 響應式狀態 (無需重新整頁載入)
-            item.status = 'INTERNAL_ACTIVE';
-            item.diff_reason = newReason;
-            item.matched_case_sid = 'I智慧確認';
+            // 4. 即時更新本機 Vue 響應式狀態 (所有相同物業的卡片同步連動切換)
+            matchedItems.forEach(it => {
+              it.status = 'INTERNAL_ACTIVE';
+              it.diff_reason = newReason;
+              it.matched_case_sid = 'I智慧確認';
+            });
 
             modalItem.value = null;
           } catch (err) {
@@ -634,35 +672,47 @@
         }
 
         async function confirmRemoveInternal(item) {
-          if (!confirm(`確定要將【${item.t591_title}】回報為「內網已下架」嗎？\n\n這將恢復為「查無外網資料」標籤，並同步通知全員。`)) {
+          const fp = generateFingerprint(item);
+          const matchedItems = items.value.filter(it => isSameProperty(item, it));
+          const matchedIds = matchedItems.map(it => it.id);
+          const countToRevert = matchedItems.filter(it => it.status === 'INTERNAL_ACTIVE').length;
+
+          let confirmMsg = `確定要將【${item.t591_title}】回報為「內網已下架」嗎？\n\n這將恢復為「查無外網資料」標籤，並同步通知全員。`;
+          if (matchedItems.length > 1) {
+            confirmMsg = `確定要將【${item.t591_title}】回報為「內網已下架」嗎？\n\n（偵測到有 ${matchedItems.length} 筆重複刊登物件，將一併同步恢復為「查無外網資料」）`;
+          }
+
+          if (!confirm(confirmMsg)) {
             return;
           }
 
           try {
-            const fp = generateFingerprint(item);
             const nowStr = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
 
             // 1. 將 internal_active_houses 標記為 REMOVED
             const removeSql = "UPDATE internal_active_houses SET status = 'REMOVED', updated_at = ? WHERE property_fingerprint = ? OR source_house_id = ?;";
             await queryTurso(removeSql, [nowStr, fp, item.t591_id]);
 
-            // 2. 更新 compare_items 為 NOT_FOUND
+            // 2. 批次更新 compare_items 為 NOT_FOUND
             const revertReason = "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登";
-            const updateItemSql = "UPDATE compare_items SET status = 'NOT_FOUND', diff_reason = ?, matched_case_sid = NULL WHERE id = ?;";
-            await queryTurso(updateItemSql, [revertReason, item.id]);
+            const placeholders = matchedIds.map(() => '?').join(',');
+            const updateItemSql = `UPDATE compare_items SET status = 'NOT_FOUND', diff_reason = ?, matched_case_sid = NULL WHERE id IN (${placeholders});`;
+            await queryTurso(updateItemSql, [revertReason, ...matchedIds]);
 
-            // 3. 更新 compare_reports 計數
-            if (report.value && report.value.report_id) {
+            // 3. 更新 compare_reports 計數 (依實際受影響筆數增減)
+            if (report.value && report.value.report_id && countToRevert > 0) {
               await queryTurso(
-                "UPDATE compare_reports SET not_found_count = not_found_count + 1, internal_active_count = MAX(0, internal_active_count - 1) WHERE report_id = ?;",
-                [report.value.report_id]
+                "UPDATE compare_reports SET not_found_count = not_found_count + ?, internal_active_count = MAX(0, internal_active_count - ?) WHERE report_id = ?;",
+                [countToRevert, countToRevert, report.value.report_id]
               );
             }
 
-            // 4. 即時更新本機 Vue 響應式狀態
-            item.status = 'NOT_FOUND';
-            item.diff_reason = revertReason;
-            item.matched_case_sid = null;
+            // 4. 即時更新本機 Vue 響應式狀態 (所有重複刊登卡片同步切換)
+            matchedItems.forEach(it => {
+              it.status = 'NOT_FOUND';
+              it.diff_reason = revertReason;
+              it.matched_case_sid = null;
+            });
           } catch (err) {
             alert('下架失敗: ' + err.message);
           }
