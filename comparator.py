@@ -456,14 +456,7 @@ class InventoryComparator:
                 cand_list.append((diff_area, y, comm_match))
             return cand_list
 
-        candidates = collect_candidates(floor_tolerance=False)
-        is_floor_override = False
-        if not candidates:
-            candidates = collect_candidates(floor_tolerance=True)
-            if candidates:
-                is_floor_override = True
-
-        if not candidates:
+        def check_internal_match(default_reason: str):
             # 檢查是否有同仁手動回報之「內部網頁已上架」紀錄 (全員共享、跨平台比對)
             if internal_list:
                 h_fp = generate_property_fingerprint(c1, d1, st1, f1, p1, a1)
@@ -537,7 +530,17 @@ class InventoryComparator:
                         }
                         return pseudo_yc, "INTERNAL_ACTIVE", reason, 90.0
 
-            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登", 0.0
+            return None, "NOT_FOUND", default_reason, 0.0
+
+        candidates = collect_candidates(floor_tolerance=False)
+        is_floor_override = False
+        if not candidates:
+            candidates = collect_candidates(floor_tolerance=True)
+            if candidates:
+                is_floor_override = True
+
+        if not candidates:
+            return check_internal_match("🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登")
 
         # 若有多筆符合硬性條件，以 特徵吻合度、總價接近度 與 坪數誤差 綜合評分排序
         def score_cand(item):
@@ -763,12 +766,12 @@ class InventoryComparator:
             )
             return make_return(status, reason)
 
-        # 多重異常排除 (黃金準則：若出現 3 個或以上錯誤，或無社區吻合且路名出入+顯著價差，判定為不同物件 NOT_FOUND)
+        # 多重異常排除 (黃金準則：若出現 3 個或以上錯誤，或無社區吻合且路名出入+顯著價差，判定為不同物件 NOT_FOUND，回落內部在庫檢查)
         if len(anomalies) >= 3:
-            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (多項關鍵特徵出入過大，判定非同一物件)", 0.0
+            return check_internal_match("🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (多項關鍵特徵出入過大，判定非同一物件)")
 
         if not comm_match and has_street_diff and has_price_diff and (abs(diff_price) >= 200.0 or abs(diff_price) / max(p1, p2) >= 0.08):
-            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (路名不同且價差過大，判定非同一物件)", 0.0
+            return check_internal_match("🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (路名不同且價差過大，判定非同一物件)")
 
         if has_price_diff:
             status = "PRICE_MISMATCH"
