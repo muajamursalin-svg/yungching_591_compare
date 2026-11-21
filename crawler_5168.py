@@ -241,8 +241,9 @@ class HousePrice5168Crawler:
                 if fl in [0, 1, 99]:
                     fl = 99
 
-            # 判斷是否為土地
-            is_land = any(k in (case_type + (c.get("purposeName") or "") + (c.get("caseName") or "")) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            # 判斷是否為土地 (依 5168 底層 API 結構化欄位判斷：caseType 或 purposeName 為土地，絕不透過標題 caseName 判斷)
+            purpose = c.get("purposeName") or ""
+            is_land = any(k == case_type for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"]) or (purpose == "土地")
             pin_val = float(c.get("buildPin") or c.get("landPin") or 0.0)
             if is_land:
                 case_type = "土地"

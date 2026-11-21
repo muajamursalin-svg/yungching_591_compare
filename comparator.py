@@ -190,13 +190,8 @@ class InventoryComparator:
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
-        # 0. 判斷是否為「土地類型」物件 (段名不是路名、比對地坪、單純判斷縣市區域段名)
-        is_h_land = (
-            bool(h.get("is_land")) or 
-            any(k in (h.get("case_type") or "") for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"]) or
-            any(k in t1 for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
-            bool(extract_section_name(st1))
-        )
+        # 0. 判斷是否為「土地類型」物件 (純依底層 API 官方欄位 is_land 或 case_type == '土地'，絕不看標題行銷詞)
+        is_h_land = bool(h.get("is_land")) or (h.get("case_type") == "土地")
 
         if is_h_land:
             h_sec = extract_section_name(st1) or extract_section_name(t1)
@@ -204,13 +199,8 @@ class InventoryComparator:
 
             land_candidates = []
             for y in yc_list:
-                # 判斷永慶分店在庫物件是否為土地
-                is_y_land = (
-                    y.get("case_type") == "土地" or 
-                    y.get("purpose") == "土地" or 
-                    any(k in (y.get("case_name") or "") for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
-                    bool(extract_section_name(y.get("address") or ""))
-                )
+                # 判斷永慶分店在庫物件是否為土地 (純依官方欄位 case_type 或 purpose)
+                is_y_land = (y.get("case_type") == "土地" or y.get("purpose") == "土地")
                 if not is_y_land:
                     continue
 
@@ -921,12 +911,7 @@ class InventoryComparator:
             allf_val = h.get("all_floor")
             to_f_val = h.get("to_floor")
 
-            is_land = (
-                bool(h.get("is_land")) or 
-                (h.get("case_type") == "土地") or 
-                any(k in title for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
-                bool(extract_section_name(h.get("street") or ""))
-            )
+            is_land = bool(h.get("is_land")) or (h.get("case_type") == "土地")
 
             if is_land:
                 f_str = "土地"

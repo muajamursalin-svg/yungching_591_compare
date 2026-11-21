@@ -210,8 +210,8 @@ class RakuyaShopCrawler:
                 if floor in [0, 1]:
                     floor = 99
 
-            # 判斷是否為土地
-            is_land = any(k in (case_type + title) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            # 判斷是否為土地 (依樂屋網結構化 case_type 標籤判斷，絕不透過 title 判斷)
+            is_land = any(k == case_type for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
             if is_land:
                 case_type = "土地"
 

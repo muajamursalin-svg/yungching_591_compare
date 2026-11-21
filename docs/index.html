@@ -535,15 +535,8 @@
 
         function isLandItem(item) {
           if (!item) return false;
-          const t = (item.t591_title || '').toLowerCase();
-          const f = String(item.t591_floor || '');
-          const addr = (item.t591_address || '');
-          return (
-            t.includes('土地') || t.includes('農地') || t.includes('建地') || 
-            t.includes('甲建') || t.includes('乙建') || t.includes('丙建') || t.includes('丁建') ||
-            f === '土地' || f === '0/0' || f === '0' ||
-            /[\u4e00-\u9fa50-9一二三四五六七八九十]+段/.test(addr)
-          );
+          const f = String(item.t591_floor || '').trim();
+          return f === '土地';
         }
 
         // 判斷兩筆廣告是否為同一個物件 (支援重複刊登、換標題、小數點容錯)

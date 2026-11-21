@@ -213,10 +213,12 @@ class T591ShopCrawler:
                 if fl in [0, 1, 99]:
                     fl = 99
 
-            # 判斷是否為土地
-            is_land = (shape == 0) or any(k in (kind + (h.get("fulladdress") or "") + (h.get("address") or "")) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            # 判斷是否為土地 (依 591 底層 API 結構化欄位判斷：shape == 0 或 kind_name == '土地')
+            # 若 shape in [1, 2, 3, 4, 8] 或 kind_name in ['住宅', '店面', '辦公', '廠房']，絕對不可因標題行銷詞而誤判為土地
+            is_land = (shape == 0) or (kind == "土地")
             g_area = float(h.get("groundarea") or 0.0)
-            area_val = g_area if (is_land and g_area > 0) else float(h.get("area") or 0.0)
+            reg_area_val = float(h.get("area") or 0.0)
+            area_val = g_area if (is_land and g_area > 0) else reg_area_val
             case_type_val = "土地" if is_land else (kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"))
 
             std_item = {
