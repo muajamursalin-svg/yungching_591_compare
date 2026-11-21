@@ -90,15 +90,20 @@
         </div>
       </div>
 
-      <!-- 分頁標籤篩選 -->
-      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+      <!-- 分頁標籤篩選 (全部展開無卷軸，清楚點選) -->
+      <div class="flex flex-wrap items-center gap-2 pb-1 text-xs">
         <button 
           v-for="tab in tabs" 
           :key="tab.key"
           @click="currentTab = tab.key"
-          :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold' : 'bg-white text-slate-600 border border-slate-200'"
-          class="px-3 py-1.5 rounded-full whitespace-nowrap transition-colors shadow-sm">
-          {{ tab.name }} ({{ tab.count }})
+          :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold ring-2 ring-emerald-600 ring-offset-1 shadow' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm'"
+          class="px-2.5 py-1.5 rounded-lg transition-all flex items-center justify-center">
+          <span>{{ tab.name }}</span>
+          <span 
+            :class="currentTab === tab.key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'" 
+            class="ml-1.5 px-1.5 py-0.5 rounded-full text-[11px] font-bold">
+            {{ tab.count }}
+          </span>
         </button>
       </div>
 
