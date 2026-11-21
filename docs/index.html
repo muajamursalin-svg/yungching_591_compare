@@ -78,15 +78,15 @@
           <div class="text-xs text-slate-500 flex items-center gap-1">
             <span class="w-2 h-2 rounded-full bg-red-500"></span> 查無外網資料
           </div>
-          <div class="text-xl font-bold text-slate-800 mt-1">{{ report.not_found_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
+          <div class="text-xl font-bold text-slate-800 mt-1">{{ counts.NOT_FOUND }} <span class="text-xs font-normal text-slate-400">件</span></div>
         </div>
 
-        <!-- 價格不一致 -->
+        <!-- 內部網頁已上架 -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
           <div class="text-xs text-slate-500 flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-amber-500"></span> 價格不一致
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 內部網頁已上架
           </div>
-          <div class="text-xl font-bold text-slate-800 mt-1">{{ report.price_diff_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
+          <div class="text-xl font-bold text-emerald-700 mt-1">{{ counts.INTERNAL_ACTIVE }} <span class="text-xs font-normal text-slate-400">件</span></div>
         </div>
       </div>
 
@@ -171,6 +171,9 @@
               <span class="text-slate-400">分店標價:</span>
               <span class="font-bold text-emerald-600 ml-1 text-sm">{{ item.matched_price }}萬</span>
             </div>
+            <div v-else-if="item.status === 'INTERNAL_ACTIVE'" class="text-emerald-700 font-semibold">
+              內網已上架確認
+            </div>
             <div v-else class="text-slate-400">
               分店無此庫存
             </div>
@@ -178,31 +181,109 @@
 
           <!-- 差異原因詳細說明 -->
           <div 
-            :class="item.status === 'NORMAL' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-amber-900 bg-amber-50 border border-amber-200'"
+            :class="(item.status === 'NORMAL' || item.status === 'INTERNAL_ACTIVE') ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' : 'text-amber-900 bg-amber-50 border border-amber-200'"
             class="p-2.5 rounded-lg text-xs leading-relaxed whitespace-pre-line">
             <span class="font-bold text-xs block mb-1">📋 診斷說明：</span>{{ item.diff_reason }}
           </div>
 
-          <!-- 連結按鈕 -->
-          <div class="flex gap-2 pt-1">
+          <!-- 連結與操作按鈕 -->
+          <div class="flex flex-wrap gap-2 pt-1">
             <a 
               :href="item.t591_url" 
               target="_blank"
-              class="flex-1 text-center py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50">
+              class="flex-1 min-w-[130px] text-center py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all">
               查看 {{ platformLabel }} 刊登
             </a>
             <a 
               v-if="item.matched_url"
               :href="item.matched_url" 
               target="_blank"
-              class="flex-1 text-center py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700">
+              class="flex-1 min-w-[130px] text-center py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-all">
               查看分店庫存網址
             </a>
+            <!-- 手動回報「內部網頁已上架」按鈕 (當狀態為查無外網資料時) -->
+            <button 
+              v-if="item.status === 'NOT_FOUND'"
+              @click="openReportModal(item)"
+              class="flex-1 min-w-[130px] py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all active:scale-95">
+              <span>🟢</span> 回報內網已上架
+            </button>
+            <!-- 手動回報「內網已下架」按鈕 (恢復為查無外網資料) -->
+            <button 
+              v-if="item.status === 'INTERNAL_ACTIVE'"
+              @click="confirmRemoveInternal(item)"
+              class="flex-1 min-w-[130px] py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all active:scale-95">
+              <span>🔴</span> 回報內網已下架
+            </button>
           </div>
 
         </div>
       </div>
     </main>
+
+    <!-- 回報內部網頁已上架彈窗 Modal -->
+    <div v-if="modalItem" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+        <div class="flex items-center justify-between border-b pb-3 border-slate-100">
+          <h3 class="text-base font-bold text-slate-800 flex items-center gap-1.5">
+            <span>🟢</span> 回報內部網頁已上架
+          </h3>
+          <button @click="modalItem = null" class="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        
+        <div class="text-xs space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div class="font-bold text-slate-800 line-clamp-2">{{ modalItem.t591_title }}</div>
+          <div class="text-slate-600 flex gap-2">
+            <span>開價: <strong class="text-red-600">{{ modalItem.t591_price }}萬</strong></span>
+            <span>建坪: <strong>{{ modalItem.t591_area }}坪</strong></span>
+            <span>樓層: <strong>{{ modalItem.t591_floor }}</strong></span>
+          </div>
+          <div v-if="modalItem.t591_address" class="text-slate-500 font-mono">📍 {{ modalItem.t591_address }}</div>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">
+              店頭內網案號 <span class="text-slate-400 font-normal">(選填，如 7476024)</span>
+            </label>
+            <input 
+              v-model="reportForm.caseNo"
+              type="text" 
+              placeholder="例如 7476024"
+              class="w-full bg-white border border-slate-300 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">
+              備註說明 <span class="text-slate-400 font-normal">(選填)</span>
+            </label>
+            <input 
+              v-model="reportForm.notes"
+              type="text" 
+              placeholder="例如：內網已上架，等外網同步"
+              class="w-full bg-white border border-slate-300 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          </div>
+        </div>
+
+        <p class="text-[11px] text-emerald-800 leading-relaxed bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
+          💡 回報後，全員比對同一個物件都會自動標示為「內部網頁已上架」；未來外網正式同步上架時，系統將自動納入在庫並自動清理。
+        </p>
+
+        <div class="flex gap-2 pt-1">
+          <button 
+            @click="modalItem = null" 
+            class="flex-1 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50">
+            取消
+          </button>
+          <button 
+            @click="submitReportActive" 
+            :disabled="submitting"
+            class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-md transition-all flex items-center justify-center gap-1">
+            <span v-if="submitting">儲存中...</span>
+            <span v-else>確認回報上架</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -211,6 +292,7 @@
     createApp({
       setup() {
         const loading = ref(true);
+        const submitting = ref(false);
         const error = ref(null);
         const report = ref(null);
         const items = ref([]);
@@ -218,6 +300,9 @@
         const keyword = ref('');
         const liveYcCount = ref(null);
         const liveYcSyncTime = ref('');
+
+        const modalItem = ref(null);
+        const reportForm = ref({ caseNo: '', notes: '' });
 
         // 從 URL 取得 report_id 或 shop_id，以及可選的 API 來源
         const urlParams = new URLSearchParams(window.location.search);
@@ -234,6 +319,7 @@
           const stmt = { sql };
           if (args.length > 0) {
             stmt.args = args.map(a => {
+              if (a === null || a === undefined) return { type: 'null' };
               if (typeof a === 'number') return { type: 'integer', value: a.toString() };
               return { type: 'text', value: a.toString() };
             });
@@ -258,12 +344,12 @@
           const first = data.results[0];
           if (first.type === 'error') throw new Error(first.error.message);
 
-          const cols = first.response.result.cols.map(c => c.name);
-          const rows = first.response.result.rows.map(r => {
+          const cols = (first.response?.result?.cols || []).map(c => c.name);
+          const rows = (first.response?.result?.rows || []).map(r => {
             const obj = {};
             cols.forEach((col, idx) => {
               const cell = r[idx];
-              obj[col] = cell.value;
+              obj[col] = cell ? cell.value : null;
             });
             return obj;
           });
@@ -286,7 +372,7 @@
               const data = await res.json();
               if (data.error) throw new Error(data.error);
               report.value = data.report;
-              items.value = data.items;
+              items.value = data.items || [];
               return;
             }
 
@@ -328,11 +414,26 @@
           }
         }
 
+        // 動態計算各狀態筆數，確保手動回報上/下架時 100% 即時同步響應
+        const counts = computed(() => {
+          const c = {
+            NOT_FOUND: 0,
+            INTERNAL_ACTIVE: 0,
+            PRICE_MISMATCH: 0,
+            SPEC_MISMATCH: 0,
+            NORMAL: 0,
+            all: items.value.length
+          };
+          items.value.forEach(it => {
+            if (c[it.status] !== undefined) {
+              c[it.status]++;
+            }
+          });
+          return c;
+        });
+
         const abnormalCount = computed(() => {
-          if (!report.value) return 0;
-          return (parseInt(report.value.not_found_count) || 0) + 
-                 (parseInt(report.value.price_diff_count) || 0) + 
-                 (parseInt(report.value.spec_diff_count) || 0);
+          return counts.value.NOT_FOUND + counts.value.PRICE_MISMATCH + counts.value.SPEC_MISMATCH;
         });
 
         const platformLabel = computed(() => {
@@ -356,10 +457,11 @@
 
         const tabs = computed(() => [
           { key: 'abnormal', name: '全部異常', count: abnormalCount.value },
-          { key: 'NOT_FOUND', name: '查無外網資料', count: report.value?.not_found_count || 0 },
-          { key: 'PRICE_MISMATCH', name: '價格不一致', count: report.value?.price_diff_count || 0 },
-          { key: 'SPEC_MISMATCH', name: '規格不符', count: report.value?.spec_diff_count || 0 },
-          { key: 'NORMAL', name: '正常在售', count: report.value?.matched_count || 0 },
+          { key: 'NOT_FOUND', name: '查無外網資料', count: counts.value.NOT_FOUND },
+          { key: 'INTERNAL_ACTIVE', name: '內部網頁已上架', count: counts.value.INTERNAL_ACTIVE },
+          { key: 'PRICE_MISMATCH', name: '價格不一致', count: counts.value.PRICE_MISMATCH },
+          { key: 'SPEC_MISMATCH', name: '規格不符', count: counts.value.SPEC_MISMATCH },
+          { key: 'NORMAL', name: '正常在售', count: counts.value.NORMAL },
           { key: 'all', name: '全部物件', count: items.value.length },
         ]);
 
@@ -367,7 +469,7 @@
           return items.value.filter(item => {
             // Tab 篩選
             if (currentTab.value === 'abnormal') {
-              if (item.status === 'NORMAL') return false;
+              if (item.status === 'NORMAL' || item.status === 'INTERNAL_ACTIVE') return false;
             } else if (currentTab.value !== 'all') {
               if (item.status !== currentTab.value) return false;
             }
@@ -389,6 +491,7 @@
         function statusLabel(status) {
           switch (status) {
             case 'NORMAL': return '🟢 正常在售';
+            case 'INTERNAL_ACTIVE': return '🟢 內部網頁已上架';
             case 'NOT_FOUND': return '🔴 查無外網資料';
             case 'PRICE_MISMATCH': return '🟡 價格不一致';
             case 'SPEC_MISMATCH': return '🟠 規格不符';
@@ -399,10 +502,162 @@
         function statusBadgeClass(status) {
           switch (status) {
             case 'NORMAL': return 'bg-emerald-100 text-emerald-800';
+            case 'INTERNAL_ACTIVE': return 'bg-emerald-600 text-white shadow-sm';
             case 'NOT_FOUND': return 'bg-red-100 text-red-800';
             case 'PRICE_MISMATCH': return 'bg-amber-100 text-amber-800';
             case 'SPEC_MISMATCH': return 'bg-orange-100 text-orange-800';
             default: return 'bg-slate-100 text-slate-800';
+          }
+        }
+
+        // 生成跨平台物件唯一指紋
+        function generateFingerprint(item) {
+          let addr = (item.t591_address || '').replace(/臺/g, '台');
+          let county = '';
+          let district = '';
+          let street = '';
+
+          const cMatch = addr.match(/^(.*?市|.*?縣)/);
+          if (cMatch) {
+            county = cMatch[1];
+            addr = addr.substring(county.length);
+          }
+          const dMatch = addr.match(/^(.*?區|.*?鄉|.*?鎮|.*?市)/);
+          if (dMatch) {
+            district = dMatch[1];
+            street = addr.substring(district.length);
+          } else {
+            street = addr;
+          }
+
+          let fStr = String(item.t591_floor || '');
+          let fCode = '99F';
+          if (!fStr.includes('整棟')) {
+            const fMatch = fStr.match(/(\d+)/);
+            if (fMatch) {
+              fCode = fMatch[1] + 'F';
+            }
+          }
+
+          const p = (parseFloat(item.t591_price) || 0).toFixed(1);
+          const a = (parseFloat(item.t591_area) || 0).toFixed(1);
+
+          const clean = s => (s || '').replace(/[\s\-_\\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]/g, '');
+
+          return `${clean(county)}_${clean(district)}_${clean(street)}_${fCode}_${p}M_${a}P`.toLowerCase();
+        }
+
+        function openReportModal(item) {
+          modalItem.value = item;
+          reportForm.value = { caseNo: '', notes: '' };
+        }
+
+        async function submitReportActive() {
+          if (!modalItem.value) return;
+          submitting.value = true;
+          try {
+            const item = modalItem.value;
+            const fp = generateFingerprint(item);
+            const caseNo = (reportForm.value.caseNo || '').trim();
+            const notes = (reportForm.value.notes || '').trim();
+            const nowStr = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
+
+            // 解析地址特徵
+            let addr = (item.t591_address || '').replace(/臺/g, '台');
+            let county = '', district = '', street = '';
+            const cMatch = addr.match(/^(.*?市|.*?縣)/);
+            if (cMatch) { county = cMatch[1]; addr = addr.substring(county.length); }
+            const dMatch = addr.match(/^(.*?區|.*?鄉|.*?鎮|.*?市)/);
+            if (dMatch) { district = dMatch[1]; street = addr.substring(district.length); } else { street = addr; }
+
+            let fStr = String(item.t591_floor || '');
+            let fNum = 99;
+            if (!fStr.includes('整棟')) {
+              const fMatch = fStr.match(/(\d+)/);
+              if (fMatch) fNum = parseInt(fMatch[1]);
+            }
+
+            // 1. 寫入或更新 internal_active_houses 表
+            const upsertSql = `
+              INSERT INTO internal_active_houses (
+                property_fingerprint, source_platform, source_house_id, case_name,
+                county, district, street, floor, price, reg_area,
+                reported_by, internal_case_no, status, notes, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
+              ON CONFLICT(property_fingerprint) DO UPDATE SET
+                status = 'ACTIVE',
+                internal_case_no = excluded.internal_case_no,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at;
+            `;
+            await queryTurso(upsertSql, [
+              fp, item.platform || '591', item.t591_id, item.t591_title,
+              county, district, street, fNum, parseFloat(item.t591_price) || 0, parseFloat(item.t591_area) || 0,
+              '店頭同仁', caseNo, notes, nowStr, nowStr
+            ]);
+
+            // 2. 更新 compare_items 本身狀態
+            const caseDisp = caseNo ? `案號：${caseNo}` : '已查驗在庫';
+            const notesDisp = notes ? `\n• 備註說明：${notes}` : '';
+            const newReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 內網案號：${caseDisp}\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁查驗已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。${notesDisp}`;
+
+            const updateItemSql = "UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = ? WHERE id = ?;";
+            await queryTurso(updateItemSql, [newReason, caseNo || null, item.id]);
+
+            // 3. 更新 compare_reports 計數
+            if (report.value && report.value.report_id) {
+              await queryTurso(
+                "UPDATE compare_reports SET not_found_count = MAX(0, not_found_count - 1), internal_active_count = internal_active_count + 1 WHERE report_id = ?;",
+                [report.value.report_id]
+              );
+            }
+
+            // 4. 即時更新本機 Vue 響應式狀態 (無需重新整頁載入)
+            item.status = 'INTERNAL_ACTIVE';
+            item.diff_reason = newReason;
+            item.matched_case_sid = caseNo || null;
+
+            modalItem.value = null;
+            reportForm.value = { caseNo: '', notes: '' };
+          } catch (err) {
+            alert('回報失敗: ' + err.message);
+          } finally {
+            submitting.value = false;
+          }
+        }
+
+        async function confirmRemoveInternal(item) {
+          if (!confirm(`確定要將【${item.t591_title}】回報為「內網已下架」嗎？\n\n這將恢復為「查無外網資料」標籤，並同步通知全員。`)) {
+            return;
+          }
+
+          try {
+            const fp = generateFingerprint(item);
+            const nowStr = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
+
+            // 1. 將 internal_active_houses 標記為 REMOVED
+            const removeSql = "UPDATE internal_active_houses SET status = 'REMOVED', updated_at = ? WHERE property_fingerprint = ? OR source_house_id = ?;";
+            await queryTurso(removeSql, [nowStr, fp, item.t591_id]);
+
+            // 2. 更新 compare_items 為 NOT_FOUND
+            const revertReason = "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登";
+            const updateItemSql = "UPDATE compare_items SET status = 'NOT_FOUND', diff_reason = ?, matched_case_sid = NULL WHERE id = ?;";
+            await queryTurso(updateItemSql, [revertReason, item.id]);
+
+            // 3. 更新 compare_reports 計數
+            if (report.value && report.value.report_id) {
+              await queryTurso(
+                "UPDATE compare_reports SET not_found_count = not_found_count + 1, internal_active_count = MAX(0, internal_active_count - 1) WHERE report_id = ?;",
+                [report.value.report_id]
+              );
+            }
+
+            // 4. 即時更新本機 Vue 響應式狀態
+            item.status = 'NOT_FOUND';
+            item.diff_reason = revertReason;
+            item.matched_case_sid = null;
+          } catch (err) {
+            alert('下架失敗: ' + err.message);
           }
         }
 
@@ -413,9 +668,11 @@
 
         return {
           loading,
+          submitting,
           error,
           report,
           items,
+          counts,
           currentTab,
           tabs,
           keyword,
@@ -425,7 +682,12 @@
           ycInventoryCount,
           ycSyncTime,
           statusLabel,
-          statusBadgeClass
+          statusBadgeClass,
+          modalItem,
+          reportForm,
+          openReportModal,
+          submitReportActive,
+          confirmRemoveInternal
         };
       }
     }).mount('#app');

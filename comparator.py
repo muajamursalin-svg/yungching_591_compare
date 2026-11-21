@@ -33,6 +33,41 @@ def clean_text(s: str) -> str:
     s = re.sub(r'[\s\-_\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]', '', s)
     return s.strip()
 
+def generate_property_fingerprint(
+    county: str,
+    district: str,
+    street: str,
+    floor: Any,
+    price: Any,
+    reg_area: Any
+) -> str:
+    """
+    生成跨平台物業唯一指紋 (供全員共享「內部網頁已上架」比對使用)
+    規格：{county}_{district}_{street}_{floor}F_{price}M_{area}P
+    """
+    c = clean_text(str(county or "")).replace('臺', '台')
+    d = clean_text(str(district or "")).replace('臺', '台')
+    s = clean_text(str(street or "")).replace('臺', '台')
+
+    try:
+        f = int(floor or 0)
+    except Exception:
+        f = 0
+    f_code = "99F" if f in [0, 99, -1] else f"{f}F"
+
+    try:
+        p = f"{float(price or 0.0):.1f}M"
+    except Exception:
+        p = "0.0M"
+
+    try:
+        a = f"{float(reg_area or 0.0):.1f}P"
+    except Exception:
+        a = "0.0P"
+
+    return f"{c}_{d}_{s}_{f_code}_{p}_{a}".lower()
+
+
 class InventoryComparator:
     """
     通用庫存比對引擎：
@@ -97,7 +132,12 @@ class InventoryComparator:
 
         return None
 
-    def match_house(self, h: Dict[str, Any], yc_list: List[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], str, str, float]:
+    def match_house(
+        self,
+        h: Dict[str, Any],
+        yc_list: List[Dict[str, Any]],
+        internal_list: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[Optional[Dict[str, Any]], str, str, float]:
         """
         通用兩階段嚴格比對核心：
         階段一 (Hard Filters 硬性門檻)：
@@ -262,6 +302,61 @@ class InventoryComparator:
                 is_floor_override = True
 
         if not candidates:
+            # 檢查是否有同仁手動回報之「內部網頁已上架」紀錄 (全員共享、跨平台比對)
+            if internal_list:
+                h_fp = generate_property_fingerprint(c1, d1, st1, f1, p1, a1)
+                for item in internal_list:
+                    matched_internal = False
+                    # 1. 指紋完全吻合
+                    if item.get("property_fingerprint") == h_fp:
+                        matched_internal = True
+                    else:
+                        # 2. 核心特徵比對 (縣市、路名/區域、樓層、總價差距 <= 50萬、坪數差距 <= 1.5坪)
+                        it_c = clean_text(item.get("county") or "").replace('臺', '台')
+                        it_s = clean_text(item.get("street") or "").replace('臺', '台')
+                        it_d = clean_text(item.get("district") or "").replace('臺', '台')
+                        c1_n = c1.replace('臺', '台')
+                        st1_n = st1.replace('臺', '台')
+
+                        if it_c == c1_n:
+                            st_match_int = bool(st1_n and (st1_n in it_s or it_s in st1_n))
+                            dist_match_int = bool(d1 and it_d and d1 == it_d)
+                            if st_match_int or dist_match_int:
+                                it_f = int(item.get("floor") or 0)
+                                f_ok = (f1 == it_f) or (f1 in [0, 99, -1] and it_f in [0, 99, -1])
+                                if f_ok:
+                                    it_p = float(item.get("price") or 0.0)
+                                    it_a = float(item.get("reg_area") or 0.0)
+                                    if abs(p1 - it_p) <= 50.0 and abs(a1 - it_a) <= 1.5:
+                                        matched_internal = True
+
+                    if matched_internal:
+                        case_no = item.get("internal_case_no") or "已查驗在庫"
+                        rep_time = item.get("created_at") or "近期"
+                        rep_user = item.get("reported_by") or "店頭同仁"
+                        notes = item.get("notes") or ""
+                        notes_str = f"\n• 備註說明：{notes}" if notes else ""
+
+                        reason = (
+                            f"🟢 內部網頁已上架 (同仁手動回報・全員共享)\n"
+                            f"• 內網案號：{case_no}\n"
+                            f"• 回報時間：{rep_time} (由 {rep_user} 確認上架)\n"
+                            f"• 說明：此物件在外網雖查無資料，但經同仁查驗已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。{notes_str}"
+                        )
+                        pseudo_yc = {
+                            "case_sid": item.get("internal_case_no") or item.get("source_house_id"),
+                            "branch_id": "INTERNAL",
+                            "branch_name": f"內網已在庫 ({case_no})",
+                            "price": float(item.get("price") or p1),
+                            "from_floor": item.get("floor") or f1,
+                            "to_floor": item.get("to_floor") or 0,
+                            "up_floor": item.get("all_floor") or allf1,
+                            "reg_area": float(item.get("reg_area") or a1),
+                            "address": f"{item.get('county') or c1}{item.get('district') or d1}{item.get('street') or st1}",
+                            "case_name": item.get("case_name") or h.get("title") or "",
+                        }
+                        return pseudo_yc, "INTERNAL_ACTIVE", reason, 90.0
+
             return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登", 0.0
 
         # 若有多筆符合硬性條件，以 特徵吻合度、總價接近度 與 坪數誤差 綜合評分排序
@@ -607,12 +702,24 @@ class InventoryComparator:
         yc_inventory_count = len(yc_list)
         yc_synced_at = max((y.get("updated_at") or "") for y in yc_list) if yc_list else ""
 
+        # 3.2 取得同仁手動回報之「內部網頁已上架」庫存 (全員共享、跨平台比對)
+        internal_list = []
+        try:
+            internal_list = self.db.execute(
+                "SELECT * FROM internal_active_houses WHERE status = 'ACTIVE';"
+            )
+            if internal_list:
+                print(f"📌 已載入同仁手動回報內網在庫物業: {len(internal_list)} 筆")
+        except Exception as e:
+            print(f"[Warn] 讀取 internal_active_houses 失敗: {e}")
+
         print(f"{platform} 待比對: {len(std_houses)} 筆 | 永慶分店在庫: {yc_inventory_count} 筆 (最新同步: {yc_synced_at})")
 
         matched_count = 0
         price_diff_count = 0
         not_found_count = 0
         spec_diff_count = 0
+        internal_active_count = 0
         report_items = []
 
         for h in std_houses:
@@ -632,10 +739,24 @@ class InventoryComparator:
             h_url = h.get("url") or ""
             addr_val = f"{h.get('county') or ''}{h.get('district') or ''}{h.get('street') or ''}".strip()
 
-            best_match, status, reason, confidence = self.match_house(h, yc_list)
+            best_match, status, reason, confidence = self.match_house(h, yc_list, internal_list=internal_list)
 
             if status == "NORMAL":
                 matched_count += 1
+                # 若該物件外網已正常在售，自動畢業清理 internal_active_houses 內網暫存
+                try:
+                    h_fp = generate_property_fingerprint(
+                        h.get("county"), h.get("district"), h.get("street"),
+                        h.get("floor"), h.get("price"), h.get("reg_area")
+                    )
+                    self.db.execute(
+                        "DELETE FROM internal_active_houses WHERE status = 'ACTIVE' AND property_fingerprint = ?;",
+                        [h_fp]
+                    )
+                except Exception as e:
+                    print(f"[Warn] 自動畢業清理 internal_active_houses 失敗: {e}")
+            elif status == "INTERNAL_ACTIVE":
+                internal_active_count += 1
             elif status == "PRICE_MISMATCH":
                 price_diff_count += 1
             elif status == "SPEC_MISMATCH":
@@ -647,7 +768,7 @@ class InventoryComparator:
                 pyc = float(best_match.get("price") or 0.0)
                 sid = best_match.get("case_sid")
                 b_name = best_match.get("branch_name") or best_match.get("branch_id")
-                b_url = f"https://buy.yungching.com.tw/house/{sid}"
+                b_url = f"https://buy.yungching.com.tw/house/{sid}" if str(sid).isdigit() else ""
 
                 report_items.append((
                     report_id, shop_id, hid, title, p_val, area_val, f_str, comm_val, cover_val, h_url,
@@ -695,14 +816,14 @@ class InventoryComparator:
             """
             INSERT INTO compare_reports (
                 report_id, shop_id, shop_url, user_id, total_591_count, matched_count,
-                price_diff_count, not_found_count, spec_diff_count, created_at, platform,
-                yc_inventory_count, yc_synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                price_diff_count, not_found_count, spec_diff_count, internal_active_count,
+                created_at, platform, yc_inventory_count, yc_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 report_id, shop_id, full_shop_url, user_id, len(std_houses), matched_count,
-                price_diff_count, not_found_count, spec_diff_count, now_str, platform,
-                yc_inventory_count, yc_synced_at
+                price_diff_count, not_found_count, spec_diff_count, internal_active_count,
+                now_str, platform, yc_inventory_count, yc_synced_at
             ]
         )
 
@@ -725,7 +846,8 @@ class InventoryComparator:
         print(f"報告 ID: {report_id}")
         print(f"{platform} 店鋪總庫存: {len(std_houses)} 筆")
         print(f"  🟢 正常在售: {matched_count} 筆")
-        print(f"  🔴 查無分店庫存 (標註下架): {not_found_count} 筆")
+        print(f"  🟢 內網已上架 (同仁回報): {internal_active_count} 筆")
+        print(f"  🔴 查無外網資料: {not_found_count} 筆")
         print(f"  🟡 價格調整/不一致: {price_diff_count} 筆")
         print(f"  🟠 規格出入 (樓層/總高/屋齡/路名): {spec_diff_count} 筆")
         print(f"  總異常件數: {abnormal_total} 筆")

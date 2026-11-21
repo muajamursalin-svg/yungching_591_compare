@@ -159,11 +159,13 @@ def build_interactive_message(db_client: Optional[TursoClient], user_id: str, me
 
     return flex_msg
 
-def format_compare_summary(platform: str, shop_id: str, total: int, matched: int, not_found: int, price_diff: int, spec_diff: int, is_cache: bool = False) -> str:
+def format_compare_summary(platform: str, shop_id: str, total: int, matched: int, not_found: int, price_diff: int, spec_diff: int, internal_active: int = 0, is_cache: bool = False) -> str:
     """產生包含清晰打勾符號與分隔區塊的精美比對報告文字"""
     plat_display = "5168 房仲店鋪" if platform == "5168" else ("樂屋網 VIP 店鋪" if platform == "rakuya" else "591 店鋪")
     abnormal = not_found + price_diff + spec_diff
     cache_note = "（距前次比對未滿 1 分鐘，回傳最新快取紀錄）\n\n" if is_cache else ""
+
+    internal_note = f"\n✔ 🟢 內網已在庫：{internal_active} 件 (同仁回報確認)" if internal_active > 0 else ""
 
     if abnormal == 0:
         abnormal_detail = "  🎉 太棒了！全部物件皆與分店一致，未發現任何異常 ✔"
@@ -182,13 +184,13 @@ def format_compare_summary(platform: str, shop_id: str, total: int, matched: int
         f"📍 店鋪代號：{shop_id}\n"
         f"📦 在庫總數：{total} 件\n\n"
         f"【📊 庫存比對結果總覽】\n"
-        f"✔ 🟢 正常在售：{matched} 件 (與分店庫存相符)\n"
+        f"✔ 🟢 正常在售：{matched} 件 (與外網分店相符){internal_note}\n"
         f"❗ ⚠️ 異常物件：{abnormal} 件 ({status_note})\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"【🔍 異常類別明細】\n"
         f"{abnormal_detail}\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"💡 點擊下方【📊 開啟 LIFF 儀表板】可查看完整物件診斷與下架標註！"
+        f"💡 點擊下方【📊 開啟 LIFF 儀表板】可查看完整物件診斷與手動回報上架！"
     )
 
 def send_line_push_notification(user_id: str, message: str, liff_url: str = "", db_client: Optional[TursoClient] = None):
@@ -319,6 +321,7 @@ def main():
         not_found = cached_rpt.get("not_found_count", 0)
         price_diff = cached_rpt.get("price_diff_count", 0)
         spec_diff = cached_rpt.get("spec_diff_count", 0)
+        internal_active = cached_rpt.get("internal_active_count", 0)
 
         summary_msg = format_compare_summary(
             platform=platform,
@@ -328,6 +331,7 @@ def main():
             not_found=not_found,
             price_diff=price_diff,
             spec_diff=spec_diff,
+            internal_active=internal_active,
             is_cache=True
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
@@ -370,6 +374,7 @@ def main():
         not_found = r.get("not_found_count", 0)
         price_diff = r.get("price_diff_count", 0)
         spec_diff = r.get("spec_diff_count", 0)
+        internal_active = r.get("internal_active_count", 0)
 
         summary_msg = format_compare_summary(
             platform=platform,
@@ -379,6 +384,7 @@ def main():
             not_found=not_found,
             price_diff=price_diff,
             spec_diff=spec_diff,
+            internal_active=internal_active,
             is_cache=False
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""

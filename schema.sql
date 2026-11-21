@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS compare_reports (
     price_diff_count INTEGER,
     not_found_count INTEGER,
     spec_diff_count INTEGER,
+    internal_active_count INTEGER DEFAULT 0,
     created_at TEXT,
     platform TEXT DEFAULT '591', -- 平台代碼 ('591', '5168', 'rakuya')
     yc_inventory_count INTEGER,  -- 永慶分店在庫總數
@@ -203,3 +204,29 @@ CREATE TABLE IF NOT EXISTS user_query_locks (
     shop_id TEXT,                      -- 當前執行店鋪代號
     locked_at TEXT                     -- 鎖定時間 (台灣時間)
 );
+
+-- 店頭同仁手動回報「內部網頁已上架」資料表 (全員共享、跨平台比對、外網上架自動畢業清理)
+CREATE TABLE IF NOT EXISTS internal_active_houses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_fingerprint TEXT UNIQUE NOT NULL, -- 物業唯一指紋 (跨平台共享)
+    source_platform TEXT,                      -- 回報來源平台 (591/5168/rakuya)
+    source_house_id TEXT,                      -- 原廣告編號
+    case_name TEXT,                            -- 案名 / 標題
+    county TEXT,                               -- 縣市 (台中市)
+    district TEXT,                             -- 區域 (西屯區)
+    street TEXT,                               -- 路名 (福星北三街)
+    floor INTEGER,                             -- 樓層 (0 或 99 為整棟)
+    to_floor INTEGER,                          -- 樓層區間
+    all_floor INTEGER,                         -- 總樓高
+    price REAL,                                -- 開價
+    reg_area REAL,                             -- 建坪
+    reported_by TEXT,                          -- 回報者 (LINE User ID 或店鋪)
+    internal_case_no TEXT,                     -- 店頭內網案號 (如 7476024)
+    status TEXT DEFAULT 'ACTIVE',              -- 'ACTIVE'(內網在庫) / 'GRADUATED'(外網已上架畢業) / 'REMOVED'(手動下架)
+    notes TEXT,                                -- 備註說明
+    created_at TEXT NOT NULL,                  -- 回報上架時間
+    updated_at TEXT NOT NULL                   -- 最後異動時間
+);
+
+CREATE INDEX IF NOT EXISTS idx_internal_active_fingerprint ON internal_active_houses(property_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_internal_active_lookup ON internal_active_houses(county, district, street, price);
