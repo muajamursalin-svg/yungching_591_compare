@@ -304,7 +304,11 @@
           if (args.length > 0) {
             stmt.args = args.map(a => {
               if (a === null || a === undefined) return { type: 'null' };
-              if (typeof a === 'number') return { type: 'integer', value: a.toString() };
+              if (typeof a === 'number') {
+                if (isNaN(a)) return { type: 'null' };
+                if (Number.isInteger(a)) return { type: 'integer', value: a.toString() };
+                return { type: 'float', value: a };
+              }
               return { type: 'text', value: a.toString() };
             });
           }
@@ -323,10 +327,13 @@
             })
           });
 
-          if (!res.ok) throw new Error(`Turso HTTP Error: ${res.status}`);
+          if (!res.ok) {
+            const errBody = await res.text();
+            throw new Error(`Turso HTTP Error ${res.status}: ${errBody}`);
+          }
           const data = await res.json();
-          const first = data.results[0];
-          if (first.type === 'error') throw new Error(first.error.message);
+          const first = data.results && data.results[0];
+          if (first && first.type === 'error') throw new Error(first.error.message);
 
           const cols = (first.response?.result?.cols || []).map(c => c.name);
           const rows = (first.response?.result?.rows || []).map(r => {
