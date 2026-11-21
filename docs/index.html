@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>591 與永慶分店庫存比對儀表板</title>
+  <title>多平台與分店庫存比對儀表板</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Vue 3 -->
@@ -20,8 +20,8 @@
     <!-- 頂部導航 -->
     <header class="bg-emerald-600 text-white px-4 pt-3.5 pb-2.5 shadow-md sticky top-0 z-30">
       <div class="flex items-center justify-between">
-        <h1 class="text-base font-bold flex items-center gap-1.5">
-          <span>🏠</span> 庫存比對儀表板
+        <h1 class="text-sm sm:text-base font-bold flex items-center gap-1.5">
+          <span>🏠</span> 多平台與分店庫存比對儀表板
         </h1>
         <span v-if="report" class="text-xs bg-emerald-700/80 px-2 py-0.5 rounded font-mono">
           {{ platformLabel }} 店鋪: {{ report.shop_id }}
@@ -402,6 +402,7 @@
         }
 
         onMounted(() => {
+          document.title = '多平台與分店庫存比對儀表板';
           loadReport();
         });
 
