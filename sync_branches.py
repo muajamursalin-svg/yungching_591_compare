@@ -311,6 +311,13 @@ class YungchingBranchSyncer:
             # 3. 確保無論成功或發生例外，必定解除鎖定
             self.release_sync_lock()
 
+        # 4. 自動觸發定期資料清理 (保留最近 3 天比對與快照紀錄)
+        try:
+            from cleanup_task import run_cleanup
+            run_cleanup(retention_days=3, db_client=self.db)
+        except Exception as e:
+            print(f"[Warn] 觸發資料清理失敗: {e}")
+
 if __name__ == "__main__":
     db = TursoClient()
     syncer = YungchingBranchSyncer(db)
