@@ -357,8 +357,9 @@ class InventoryComparator:
                 if not s_match:
                     continue
 
+            # 坪數差距在合理範圍內 (大樓嚴格限制 <= 2.0 坪，別墅透天 <= 5.0 坪，避免坪數落差過大之不同房型混入)
             y_a2 = float(y.get("reg_area") or 0.0)
-            max_area_diff = 15.0 if (f1 == 99 or best_f2 == 99) else 5.0
+            max_area_diff = 5.0 if (f1 == 99 or best_f2 == 99) else 2.0
             if abs(a1 - y_a2) > max_area_diff:
                 continue
             siblings.append(y)
