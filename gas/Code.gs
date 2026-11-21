@@ -1,12 +1,13 @@
 /**
  * Google Apps Script (GAS) - LINE Bot Webhook 與 GitHub Actions 觸發排程器
+ * 支援 591 / 5168 / 樂屋網 店鋪網址自動記憶、各平台累積查詢次數統計、動態快捷按鈕與新網址更新確認
  * 
  * 部署說明：
- * 1. 在 Google Apps Script (script.google.com) 建立專案。
+ * 1. 在 Google Apps Script (script.google.com) 貼上本程式碼。
  * 2. 在「專案設定」->「指令碼屬性 (Script Properties)」填入以下環境變數：
  *    - LINE_CHANNEL_ACCESS_TOKEN: 您的 LINE Messaging API Channel Access Token
  *    - GITHUB_TOKEN: 您的 GitHub Personal Access Token (需有 repo 權限)
- *    - GITHUB_REPO: 您的 GitHub 倉庫路徑 (格式: "用戶名/專案名"，如 "steven0612/house-inventory")
+ *    - GITHUB_REPO: 您的 GitHub 倉庫路徑 (格式: "用戶名/專案名"，如 "muajamursalin-svg/yungching_591_compare")
  *    - TURSO_DATABASE_URL: 您的 Turso URL (如 https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io)
  *    - TURSO_AUTH_TOKEN: 您的 Turso Token
  *    - LIFF_URL: 您的 GitHub Pages LIFF 網址
@@ -95,6 +96,9 @@ function doGet(e) {
   }
 }
 
+/**
+ * LINE Bot Webhook 事件主入口 (支援文字訊息與 Postback 點擊事件)
+ */
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
@@ -113,23 +117,155 @@ function doPost(e) {
 
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
+      const replyToken = event.replyToken;
+      const userId = event.source.userId;
+
+      // ───────────────────────────────────────────────
+      // A. 處理使用者點擊確認按鈕 (Postback 事件)
+      // ───────────────────────────────────────────────
+      if (event.type === "postback") {
+        const dataStr = event.postback.data || "";
+        const params = parseQueryString(dataStr);
+        const action = params.action;
+        const platform = params.platform;
+        const shopUrl = decodeURIComponent(params.url || "");
+        const shopId = params.shop_id || "";
+
+        if (action === "update_shop") {
+          // 1. 更新資料庫並累加次數
+          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, true);
+          // 2. 觸發 GitHub Actions
+          triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          // 3. 取得最新按鈕並回覆
+          const latestShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+          const qr = buildQuickReply(latestShops);
+          const count = getShopCount(latestShops, platform);
+
+          replyLineMessage(lineToken, replyToken,
+            `✅ 已為您更新 ${platform} 預設店鋪為新網址！\n\n` +
+            `📍 店鋪代號: ${shopId}\n` +
+            `📈 累積查詢: 第 ${count} 次\n` +
+            `⏳ 系統現正同步最新庫存並進行多維特徵比對...\n\n` +
+            `比對完成後將會主動發送推播報告通知您！`,
+            qr
+          );
+          continue;
+
+        } else if (action === "once_compare") {
+          // 僅單次比對，不更動預設資料庫
+          triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+          const qr = buildQuickReply(userShops);
+
+          replyLineMessage(lineToken, replyToken,
+            `⚡ 收到！本次僅作單次比對（未變更您的預設店鋪）。\n\n` +
+            `📍 ${platform} 店鋪代號: ${shopId}\n` +
+            `⏳ 系統現正進行庫存比對，完成後將推播報告通知您！`,
+            qr
+          );
+          continue;
+        }
+      }
+
+      // ───────────────────────────────────────────────
+      // B. 處理使用者文字訊息
+      // ───────────────────────────────────────────────
       if (event.type === "message" && event.message.type === "text") {
         const userMsg = event.message.text.trim();
-        const replyToken = event.replyToken;
-        const userId = event.source.userId;
 
+        // 0. 讀取使用者既有的店鋪儲存資訊
+        let userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+
+        // 1. 偵測使用者是否點擊了一鍵快捷按鈕 (例如: "查詢 591 庫存", "查詢 5168 庫存", "查詢 樂屋網 庫存")
+        const isQuick591 = (userMsg === "查詢 591 庫存" || userMsg === "查 591");
+        const isQuick5168 = (userMsg === "查詢 5168 庫存" || userMsg === "查 5168");
+        const isQuickRakuya = (userMsg === "查詢 樂屋網 庫存" || userMsg === "查 樂屋網");
+
+        if (isQuick591 || isQuick5168 || isQuickRakuya) {
+          const reqPlatform = isQuick591 ? "591" : (isQuick5168 ? "5168" : "rakuya");
+          const targetUrl = isQuick591 ? userShops?.url_591 : (isQuick5168 ? userShops?.url_5168 : userShops?.url_rakuya);
+
+          if (!targetUrl) {
+            const qr = buildQuickReply(userShops);
+            replyLineMessage(lineToken, replyToken,
+              `⚠️ 您尚未設定 ${reqPlatform} 的常用店鋪網址。\n\n請直接貼上您的 ${reqPlatform} 店鋪網址，系統將自動為您記憶，未來即可一鍵查詢！`,
+              qr
+            );
+            continue;
+          }
+
+          // 遞增查詢次數
+          incrementShopCount(tursoUrl, tursoToken, userId, reqPlatform);
+          userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+          const newCnt = getShopCount(userShops, reqPlatform);
+          const qr = buildQuickReply(userShops);
+
+          // 萃取 shopId
+          const shopId = extractShopIdFromUrl(targetUrl, reqPlatform);
+
+          // 檢查永慶分店同步鎖
+          const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
+          if (syncLock && syncLock.is_locked) {
+            replyLineMessage(lineToken, replyToken,
+              `⚠️ 目前刷新分店庫存中 請五分鐘後再查詢`,
+              qr
+            );
+            continue;
+          }
+
+          // 檢查 1 分鐘快取
+          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
+          if (cachedReport) {
+            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + 
+                             (parseInt(cachedReport.price_diff_count) || 0) + 
+                             (parseInt(cachedReport.spec_diff_count) || 0);
+            const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
+
+            replyLineMessage(lineToken, replyToken,
+              `⚡【${reqPlatform} 店鋪比對報告（快取紀錄）】\n` +
+              `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
+              `📍 ${reqPlatform} 店鋪代號: ${shopId}\n` +
+              `📈 累積查詢: 第 ${newCnt} 次\n` +
+              `📦 總在售: ${cachedReport.total_591_count} 件\n` +
+              `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
+              `⚠️ 異常物件: ${abnormal} 件\n` +
+              `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
+              `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
+              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件\n\n` +
+              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : ""),
+              qr
+            );
+            continue;
+          }
+
+          // 觸發 GitHub Actions
+          const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, targetUrl, userId, reqPlatform);
+          if (ghaSuccess) {
+            replyLineMessage(lineToken, replyToken, 
+              `✅ 收到！已啟動 ${reqPlatform} 庫存比對任務\n\n` +
+              `📍 店鋪代號: ${shopId}\n` +
+              `📈 累積查詢: 第 ${newCnt} 次\n` +
+              `⏳ 系統正在同步 ${reqPlatform} 與永慶分店庫存並進行比對（約需 30~45 秒）...\n\n` +
+              `比對完成後將會主動推播報告給您！`,
+              qr
+            );
+          } else {
+            replyLineMessage(lineToken, replyToken, 
+              `⚠️ 觸發比對排程失敗，請檢查 GitHub Token 設定。`,
+              qr
+            );
+          }
+          continue;
+        }
+
+        // 2. 偵測使用者是否貼上店鋪網址
         let platform = null;
         let shopId = null;
 
-        // 1. 偵測 5168 房仲個人店鋪或加盟店網址
         const match5168 = userMsg.match(/realtor\.houseprice\.tw\/(?:agent|store)\/buy\/([0-9a-zA-Z_-]+)/i) || 
                           userMsg.match(/houseprice\.tw[^\s]*\/buy\/([0-9a-zA-Z_-]+)/i);
-        
-        // 2. 偵測 樂屋網 VIP 店鋪網址
         const matchRakuya = userMsg.match(/vip\.rakuya\.com\.tw\/([0-9a-zA-Z_-]+)/i) ||
                             userMsg.match(/rakuya\.com\.tw[^\s]*\/([0-9a-zA-Z_-]+)/i);
-
-        // 3. 偵測 591 店鋪網址或純代號
         const match591 = userMsg.match(/broker(\d+)/i) || 
                          userMsg.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || 
                          userMsg.match(/^(\d{4,6})$/);
@@ -146,18 +282,74 @@ function doPost(e) {
         }
 
         if (platform && shopId) {
-          // 0. 檢查永慶分店庫存是否正在每六小時刷新中 (鎖定狀態)
-          const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
-          if (syncLock && syncLock.is_locked) {
+          // 檢查既有已存的該平台網址
+          let savedUrl = "";
+          if (platform === "591") savedUrl = userShops?.url_591 || "";
+          else if (platform === "5168") savedUrl = userShops?.url_5168 || "";
+          else if (platform === "rakuya") savedUrl = userShops?.url_rakuya || "";
+
+          // ── 情境 C：使用者已存有網址，但這次輸入了不同網址 ──
+          if (savedUrl && !isSameUrl(savedUrl, userMsg, platform)) {
+            const confirmQuickReply = {
+              items: [
+                {
+                  type: "action",
+                  action: {
+                    type: "postback",
+                    label: "✅ 更新預設並比對",
+                    data: `action=update_shop&platform=${platform}&url=${encodeURIComponent(userMsg)}&shop_id=${shopId}`,
+                    displayText: "確認更新預設店鋪並執行比對"
+                  }
+                },
+                {
+                  type: "action",
+                  action: {
+                    type: "postback",
+                    label: "⚡ 僅單次比對(不更新)",
+                    data: `action=once_compare&platform=${platform}&url=${encodeURIComponent(userMsg)}&shop_id=${shopId}`,
+                    displayText: "僅單次比對（不更新預設）"
+                  }
+                },
+                {
+                  type: "action",
+                  action: {
+                    type: "message",
+                    label: "❌ 取消",
+                    text: "取消查詢"
+                  }
+                }
+              ]
+            };
+
             replyLineMessage(lineToken, replyToken,
-              `⚠️ 目前刷新分店庫存中 請五分鐘後再查詢`
+              `⚠️ 偵測到您輸入了新的 ${platform} 店鋪網址！\n\n` +
+              `📌 原預設網址：\n${savedUrl}\n\n` +
+              `🆕 新輸入網址：\n${userMsg}\n\n` +
+              `請問是否要將未來的快捷查詢更新以此新網址為主？`,
+              confirmQuickReply
             );
             continue;
           }
 
-          // 1. 檢查 1 分鐘內快取 (若距上次查詢小於 60 秒，直接秒回報告)
-          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
+          // ── 情境 A & B：初次輸入儲存，或輸入與既有相同網址 ──
+          const isFirstTime = !savedUrl;
+          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, userMsg, true);
+          userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+          const currentCount = getShopCount(userShops, platform);
+          const qr = buildQuickReply(userShops);
 
+          // 檢查永慶分店庫存同步鎖
+          const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
+          if (syncLock && syncLock.is_locked) {
+            replyLineMessage(lineToken, replyToken,
+              `⚠️ 目前刷新分店庫存中 請五分鐘後再查詢`,
+              qr
+            );
+            continue;
+          }
+
+          // 檢查 1 分鐘內快取
+          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
           if (cachedReport) {
             const abnormal = (parseInt(cachedReport.not_found_count) || 0) + 
                              (parseInt(cachedReport.price_diff_count) || 0) + 
@@ -168,41 +360,56 @@ function doPost(e) {
               `⚡【${platform} 店鋪比對報告（快取紀錄）】\n` +
               `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
               `📍 ${platform} 店鋪代號: ${shopId}\n` +
-              `📦 ${platform} 總在售: ${cachedReport.total_591_count} 件\n` +
+              `📈 累積查詢: 第 ${currentCount} 次\n` +
+              `📦 總在售: ${cachedReport.total_591_count} 件\n` +
               `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
               `⚠️ 異常物件: ${abnormal} 件\n` +
               `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
               `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
               `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件\n\n` +
-              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : "")
+              (targetLiff ? `📊 點擊查看 LIFF 儀表板：\n${targetLiff}` : ""),
+              qr
             );
             continue;
           }
 
-          // 2. 超過 1 分鐘，觸發 GitHub Actions 執行最新比對
+          // 觸發 GitHub Actions
           const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId, platform);
-
           if (ghaSuccess) {
+            const memoryTip = isFirstTime ? `💡 系統已自動為您記憶此店鋪，未來可直接點選下方按鈕一鍵查詢！\n\n` : "";
             replyLineMessage(lineToken, replyToken, 
               `✅ 收到！已成功啟動 ${platform} 庫存比對任務\n\n` +
-              `📍 ${platform} 店鋪代號: ${shopId}\n` +
+              `📍 店鋪代號: ${shopId}\n` +
+              `📈 累積查詢: 第 ${currentCount} 次\n` +
+              memoryTip +
               `⏳ 系統正在同步 ${platform} 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
-              `比對完成後，系統將會主動發送推播報告通知您！`
+              `比對完成後將會主動發送推播報告通知您！`,
+              qr
             );
           } else {
             replyLineMessage(lineToken, replyToken, 
-              `⚠️ 抱歉，觸發比對排程時發生錯誤，請檢查 GitHub Token 設定。`
+              `⚠️ 抱歉，觸發比對排程時發生錯誤，請檢查 GitHub Token 設定。`,
+              qr
             );
           }
+          continue;
+
         } else {
-          // 非支援網址時的回應指引
+          // 3. 一般訊息或問候指引
+          const qr = buildQuickReply(userShops);
+          let extraTip = "";
+          if (userShops && (userShops.url_591 || userShops.url_5168 || userShops.url_rakuya)) {
+            extraTip = `\n\n✨ 點擊下方快捷按鈕，即可秒速執行常用店鋪庫存比對！`;
+          }
+
           replyLineMessage(lineToken, replyToken, 
-            `👋 您好！我是房仲跨平台庫存比對助理。\n\n` +
-            `請直接貼上您的店鋪網址，例如：\n` +
+            `👋 您好！我是房仲跨平台庫存比對助理。${extraTip}\n\n` +
+            `您也可以直接貼上店鋪網址進行比對：\n` +
             `🏠 591 店鋪：\nhttps://www.591.com.tw/broker12017\n\n` +
             `🏠 5168 房仲店鋪：\nhttps://realtor.houseprice.tw/agent/buy/0968682023/\n\n` +
             `🏠 樂屋網 VIP 店鋪：\nhttps://vip.rakuya.com.tw/0937234338/\n\n` +
-            `系統將自動解析庫存，並依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，標註「疑似已下架」或「價格調整」！`
+            `系統將自動解析庫存，並依【縣市、區域、路名、總價、樓層、總樓高、屋齡】進行跨平台比對，標註「疑似已下架」或「價格調整」！`,
+            qr
           );
         }
       }
@@ -213,6 +420,251 @@ function doPost(e) {
     console.error("doPost Error: " + err.toString());
     return ContentService.createTextOutput("Error: " + err.toString());
   }
+}
+
+// ───────────────────────────────────────────────
+// 資料庫輔助函式 (Turso HTTP Pipeline)
+// ───────────────────────────────────────────────
+
+/**
+ * 取得使用者的已存店鋪與累積查詢次數
+ */
+function getUserSavedShops(tursoUrl, tursoToken, userId) {
+  if (!tursoUrl || !tursoToken || !userId) return null;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const sql = "SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;";
+    const payload = {
+      requests: [
+        { type: "execute", stmt: { sql: sql, args: [{ type: "text", value: userId }] } },
+        { type: "close" }
+      ]
+    };
+    const res = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) return null;
+    const data = JSON.parse(res.getContentText());
+    const result = data.results[0]?.response?.result;
+    if (!result || !result.rows || result.rows.length === 0) return null;
+    const cols = result.cols.map(c => c.name);
+    const obj = {};
+    cols.forEach((c, i) => { obj[c] = result.rows[0][i].value; });
+    return obj;
+  } catch (err) {
+    console.warn("getUserSavedShops error: " + err);
+    return null;
+  }
+}
+
+/**
+ * 儲存或更新使用者的店鋪網址並遞增累積次數
+ */
+function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, incrementCount) {
+  if (!tursoUrl || !tursoToken || !userId || !platform || !shopUrl) return;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const nowStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd HH:mm:ss");
+    
+    let urlCol = "url_591";
+    let countCol = "count_591";
+    if (platform === "5168") {
+      urlCol = "url_5168";
+      countCol = "count_5168";
+    } else if (platform === "rakuya") {
+      urlCol = "url_rakuya";
+      countCol = "count_rakuya";
+    }
+    
+    const countInc = incrementCount ? 1 : 0;
+
+    const sql = `
+      INSERT INTO user_saved_shops (user_id, ${urlCol}, ${countCol}, updated_at)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        ${urlCol} = excluded.${urlCol},
+        ${countCol} = COALESCE(${countCol}, 0) + ${countInc},
+        updated_at = excluded.updated_at;
+    `;
+
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: {
+            sql: sql,
+            args: [
+              { type: "text", value: userId },
+              { type: "text", value: shopUrl },
+              { type: "text", value: nowStr }
+            ]
+          }
+        },
+        { type: "close" }
+      ]
+    };
+
+    UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.warn("saveOrUpdateUserShop error: " + err);
+  }
+}
+
+/**
+ * 遞增指定平台的查詢次數
+ */
+function incrementShopCount(tursoUrl, tursoToken, userId, platform) {
+  if (!tursoUrl || !tursoToken || !userId || !platform) return;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const nowStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd HH:mm:ss");
+    let countCol = platform === "5168" ? "count_5168" : (platform === "rakuya" ? "count_rakuya" : "count_591");
+    
+    const sql = `UPDATE user_saved_shops SET ${countCol} = COALESCE(${countCol}, 0) + 1, updated_at = ? WHERE user_id = ?;`;
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: {
+            sql: sql,
+            args: [
+              { type: "text", value: nowStr },
+              { type: "text", value: userId }
+            ]
+          }
+        },
+        { type: "close" }
+      ]
+    };
+
+    UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.warn("incrementShopCount error: " + err);
+  }
+}
+
+/**
+ * 取得指定平台的當前累積次數
+ */
+function getShopCount(userShops, platform) {
+  if (!userShops) return 1;
+  if (platform === "5168") return userShops.count_5168 || 1;
+  if (platform === "rakuya") return userShops.count_rakuya || 1;
+  return userShops.count_591 || 1;
+}
+
+// ───────────────────────────────────────────────
+// LINE Quick Reply 動態按鈕生成
+// ───────────────────────────────────────────────
+
+/**
+ * 根據使用者已綁定的平台動態產生 Quick Reply 按鈕 (只有有網址的平台才會產生對應按鈕)
+ */
+function buildQuickReply(userShops) {
+  if (!userShops) return null;
+  const items = [];
+
+  // 1. 591
+  if (userShops.url_591) {
+    const cnt = userShops.count_591 || 0;
+    items.push({
+      type: "action",
+      action: {
+        type: "message",
+        label: `🔍 查 591 (${cnt}次)`,
+        text: "查詢 591 庫存"
+      }
+    });
+  }
+
+  // 2. 5168
+  if (userShops.url_5168) {
+    const cnt = userShops.count_5168 || 0;
+    items.push({
+      type: "action",
+      action: {
+        type: "message",
+        label: `🔍 查 5168 (${cnt}次)`,
+        text: "查詢 5168 庫存"
+      }
+    });
+  }
+
+  // 3. 樂屋網
+  if (userShops.url_rakuya) {
+    const cnt = userShops.count_rakuya || 0;
+    items.push({
+      type: "action",
+      action: {
+        type: "message",
+        label: `🔍 查 樂屋網 (${cnt}次)`,
+        text: "查詢 樂屋網 庫存"
+      }
+    });
+  }
+
+  if (items.length === 0) return null;
+  return { items: items };
+}
+
+/**
+ * 從網址萃取 Shop ID
+ */
+function extractShopIdFromUrl(url, platform) {
+  if (!url) return "";
+  if (platform === "5168") {
+    const m = url.match(/realtor\.houseprice\.tw\/(?:agent|store)\/buy\/([0-9a-zA-Z_-]+)/i) || 
+              url.match(/houseprice\.tw[^\s]*\/buy\/([0-9a-zA-Z_-]+)/i);
+    return m ? m[1] : url;
+  } else if (platform === "rakuya") {
+    const m = url.match(/vip\.rakuya\.com\.tw\/([0-9a-zA-Z_-]+)/i) ||
+              url.match(/rakuya\.com\.tw[^\s]*\/([0-9a-zA-Z_-]+)/i);
+    return m ? m[1] : url;
+  } else {
+    const m = url.match(/broker(\d+)/i) || 
+              url.match(/(?:591\.com\.tw[^\s]*[?&]shop_id=)(\d+)/i) || 
+              url.match(/^(\d{4,6})$/);
+    return m ? m[1] : url;
+  }
+}
+
+/**
+ * 比較兩網址是否實質代表同一店鋪
+ */
+function isSameUrl(url1, url2, platform) {
+  if (!url1 || !url2) return false;
+  const id1 = extractShopIdFromUrl(url1, platform);
+  const id2 = extractShopIdFromUrl(url2, platform);
+  return id1 && id2 && id1.toLowerCase() === id2.toLowerCase();
+}
+
+/**
+ * 解析 QueryString 為物件
+ */
+function parseQueryString(qs) {
+  const params = {};
+  if (!qs) return params;
+  const pairs = qs.split("&");
+  for (let i = 0; i < pairs.length; i++) {
+    const pair = pairs[i].split("=");
+    if (pair.length === 2) {
+      params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1]);
+    }
+  }
+  return params;
 }
 
 /**
@@ -379,16 +831,19 @@ function triggerGitHubActions(repo, token, shopId, shopUrl, userId, platform) {
 }
 
 /**
- * LINE Messaging API 回覆訊息
+ * LINE Messaging API 回覆訊息 (支援附加 Quick Reply 按鈕)
  */
-function replyLineMessage(token, replyToken, text) {
+function replyLineMessage(token, replyToken, text, quickReply) {
   if (!token) return;
   const url = "https://api.line.me/v2/bot/message/reply";
+  const msgObj = { type: "text", text: text };
+  if (quickReply && quickReply.items && quickReply.items.length > 0) {
+    msgObj.quickReply = quickReply;
+  }
+
   const payload = {
     replyToken: replyToken,
-    messages: [
-      { type: "text", text: text }
-    ]
+    messages: [msgObj]
   };
 
   const options = {

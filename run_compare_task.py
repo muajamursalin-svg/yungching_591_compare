@@ -23,7 +23,52 @@ def detect_platform(input_str: str) -> str:
         return "rakuya"
     return "591"
 
-def send_line_push_notification(user_id: str, message: str, liff_url: str = ""):
+def build_line_quick_reply(db_client: TursoClient, user_id: str) -> Optional[dict]:
+    if not db_client or not user_id:
+        return None
+    try:
+        rows = db_client.execute("SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;", [user_id])
+        if not rows:
+            return None
+        r = rows[0]
+        items = []
+        if r.get("url_591"):
+            cnt = r.get("count_591") or 0
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": f"🔍 查 591 ({cnt}次)",
+                    "text": "查詢 591 庫存"
+                }
+            })
+        if r.get("url_5168"):
+            cnt = r.get("count_5168") or 0
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": f"🔍 查 5168 ({cnt}次)",
+                    "text": "查詢 5168 庫存"
+                }
+            })
+        if r.get("url_rakuya"):
+            cnt = r.get("count_rakuya") or 0
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": f"🔍 查 樂屋網 ({cnt}次)",
+                    "text": "查詢 樂屋網 庫存"
+                }
+            })
+        if items:
+            return {"items": items}
+    except Exception as e:
+        print(f"[Warn] 產生 Quick Reply 失敗: {e}")
+    return None
+
+def send_line_push_notification(user_id: str, message: str, liff_url: str = "", quick_reply: Optional[dict] = None):
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not token or not user_id:
         print("[Notice] 未設定 LINE_CHANNEL_ACCESS_TOKEN 或無 USER_ID，略過推播發送。")
@@ -41,6 +86,10 @@ def send_line_push_notification(user_id: str, message: str, liff_url: str = ""):
             "type": "text",
             "text": f"📊 點擊開啟 LIFF 比對儀表板：\n{liff_url}"
         })
+
+    # 若有 Quick Reply 按鈕，附加在最後一則訊息上
+    if quick_reply and quick_reply.get("items"):
+        messages[-1]["quickReply"] = quick_reply
 
     payload = {
         "to": user_id,
@@ -146,7 +195,8 @@ def main():
             f"  • 規格/樓層/屋齡出入: {spec_diff} 件"
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
-        send_line_push_notification(user_id, summary_msg, liff_target_url)
+        qr = build_line_quick_reply(db, user_id)
+        send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
         return
 
     # 3. 爬取最新庫存並轉換為標準格式
@@ -190,7 +240,8 @@ def main():
             f"  • 規格/樓層/屋齡出入: {spec_diff} 件"
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
-        send_line_push_notification(user_id, summary_msg, liff_target_url)
+        qr = build_line_quick_reply(db, user_id)
+        send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
 
 if __name__ == "__main__":
     try:
