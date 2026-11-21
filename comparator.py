@@ -211,6 +211,14 @@ class InventoryComparator:
             if st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2):
                 score += 20.0
 
+            # 樓層完全一致者額外加分 (區間僅交集重疊者保留機會但不加滿分)
+            f2 = int(y.get("from_floor") or 0)
+            to_f2 = int(y.get("to_floor") or 0)
+            effective_to_f2 = to_f2 if to_f2 > 0 else f2
+            to_f1 = int(h.get("to_floor") or f1 or 0)
+            if f1 == f2 and to_f1 == effective_to_f2:
+                score += 15.0
+
             score += max(0.0, 10.0 - diff_a * 5)
             return score
 
@@ -254,8 +262,22 @@ class InventoryComparator:
             has_street_diff = True
             anomalies.append(f"路名出入：{platform_name} 標「{st1}」 vs 永慶地址「{addr2}」")
 
+        # 樓層出入判斷 (若樓層為區間交集而非完全一致，例如 16~17樓 vs 17樓，提示樓中樓 vs 單一樓層規劃出入)
+        has_floor_range_diff = False
+        f2 = int(best_y.get("from_floor") or 0)
+        to_f2 = int(best_y.get("to_floor") or 0)
+        effective_to_f2 = to_f2 if to_f2 > 0 else f2
+        to_f1 = int(h.get("to_floor") or f1 or 0)
+
+        if f1 > 0 and f1 != 99 and f2 != 99:
+            if f1 != f2 or to_f1 != effective_to_f2:
+                has_floor_range_diff = True
+                f1_desc = f"{f1}~{to_f1}樓" if to_f1 > f1 else f"{f1}樓"
+                f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else f"{f2}樓"
+                anomalies.append(f"樓層規劃出入：{platform_name} 標「{f1_desc}」 vs 永慶標「{f2_desc}」 (疑似樓中樓 vs 單一樓層規劃出入)")
+
         # 特殊判斷 1：僅屋齡有出入，其他條件 (總價/建坪/樓層/總高/路名) 皆吻合
-        if not has_price_diff and not has_allf_diff and not has_street_diff and has_age_diff:
+        if not has_price_diff and not has_allf_diff and not has_street_diff and not has_floor_range_diff and has_age_diff:
             status = "SPEC_MISMATCH"
             f_disp = f"{f1}樓" if f1 != 99 else "整棟"
             reason = (
@@ -266,7 +288,7 @@ class InventoryComparator:
             return best_y, status, reason, confidence
 
         # 特殊判斷 2：僅總樓高有出入，其他條件 (總價/建坪/樓層/屋齡/路名) 皆吻合
-        if not has_price_diff and not has_age_diff and not has_street_diff and has_allf_diff:
+        if not has_price_diff and not has_age_diff and not has_street_diff and not has_floor_range_diff and has_allf_diff:
             status = "SPEC_MISMATCH"
             f_disp = f"{f1}樓" if f1 != 99 else "整棟"
             reason = (
@@ -277,13 +299,26 @@ class InventoryComparator:
             return best_y, status, reason, confidence
 
         # 特殊判斷 3：縣市區域、建坪、樓層、總價、總樓高、屋齡都一樣，只有路名不同
-        if not has_price_diff and not has_allf_diff and not has_age_diff and has_street_diff:
+        if not has_price_diff and not has_allf_diff and not has_age_diff and not has_floor_range_diff and has_street_diff:
             status = "SPEC_MISMATCH"
             reason = (
                 f"💡 提示：是否是路名有誤 (極少機會 但也有可能)\n"
                 f"• 縣市/區域/樓層/建坪/總價/總高皆一致\n"
                 f"• {platform_name} 路名:「{st1}」\n"
                 f"• 永慶地址:「{addr2}」"
+            )
+            return best_y, status, reason, confidence
+
+        # 特殊判斷 4：僅樓層規劃有區間出入 (無價差/無總高差/無屋齡差/無路名差)
+        if not has_price_diff and not has_allf_diff and not has_age_diff and not has_street_diff and has_floor_range_diff:
+            status = "SPEC_MISMATCH"
+            f1_desc = f"{f1}~{to_f1}樓" if to_f1 > f1 else f"{f1}樓"
+            f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else f"{f2}樓"
+            reason = (
+                f"💡 提示：樓層規劃出入 (疑似樓中樓 vs 單一樓層規劃出入)\n"
+                f"• {platform_name} 標示樓層：{f1_desc} vs 永慶標示樓層：{f2_desc}\n"
+                f"• 兩者樓層雖有交集，但單層與樓中樓規劃不同，可能為不同戶別或案源出入\n"
+                f"• 總價 ({p1}萬)、建坪 ({a1}坪)、屋齡 ({age1}年)、總樓高皆相符"
             )
             return best_y, status, reason, confidence
 
