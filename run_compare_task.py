@@ -39,7 +39,7 @@ def build_line_quick_reply(db_client: TursoClient, user_id: str) -> Optional[dic
                 "action": {
                     "type": "message",
                     "label": f"🔍 查 591 ({cnt}次)",
-                    "text": "查詢 591 庫存"
+                    "text": r.get("url_591")
                 }
             })
         if r.get("url_5168"):
@@ -49,7 +49,7 @@ def build_line_quick_reply(db_client: TursoClient, user_id: str) -> Optional[dic
                 "action": {
                     "type": "message",
                     "label": f"🔍 查 5168 ({cnt}次)",
-                    "text": "查詢 5168 庫存"
+                    "text": r.get("url_5168")
                 }
             })
         if r.get("url_rakuya"):
@@ -59,7 +59,7 @@ def build_line_quick_reply(db_client: TursoClient, user_id: str) -> Optional[dic
                 "action": {
                     "type": "message",
                     "label": f"🔍 查 樂屋網 ({cnt}次)",
-                    "text": "查詢 樂屋網 庫存"
+                    "text": r.get("url_rakuya")
                 }
             })
         if items:

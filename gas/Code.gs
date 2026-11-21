@@ -585,7 +585,7 @@ function buildQuickReply(userShops) {
       action: {
         type: "message",
         label: `🔍 查 591 (${cnt}次)`,
-        text: "查詢 591 庫存"
+        text: userShops.url_591
       }
     });
   }
@@ -598,7 +598,7 @@ function buildQuickReply(userShops) {
       action: {
         type: "message",
         label: `🔍 查 5168 (${cnt}次)`,
-        text: "查詢 5168 庫存"
+        text: userShops.url_5168
       }
     });
   }
@@ -611,7 +611,7 @@ function buildQuickReply(userShops) {
       action: {
         type: "message",
         label: `🔍 查 樂屋網 (${cnt}次)`,
-        text: "查詢 樂屋網 庫存"
+        text: userShops.url_rakuya
       }
     });
   }
