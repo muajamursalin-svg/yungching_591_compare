@@ -135,9 +135,9 @@
           <!-- 狀態標籤與 ID -->
           <div class="flex items-center justify-between">
             <span 
-              :class="statusBadgeClass(item.status)"
+              :class="statusBadgeClass(item.status, item)"
               class="text-xs font-semibold px-2 py-0.5 rounded-md">
-              {{ statusLabel(item.status) }}
+              {{ statusLabel(item.status, item) }}
             </span>
             <span class="text-[11px] text-slate-400 font-mono">{{ platformLabel }}編號: {{ item.t591_id }}</span>
           </div>
@@ -499,10 +499,16 @@
           });
         });
 
-        function statusLabel(status) {
+        function statusLabel(status, item) {
           switch (status) {
             case 'NORMAL': return '🟢 正常在售';
-            case 'INTERNAL_ACTIVE': return '🟢 內部網頁已上架';
+            case 'INTERNAL_ACTIVE': {
+              const r = item?.diff_reason || '';
+              if (r.includes('建坪') && (r.includes('異常') || r.includes('出入'))) return '🟢 內網已上架 (建坪異常)';
+              if (r.includes('開價') && (r.includes('出入') || r.includes('不一致'))) return '🟢 內網已上架 (開價出入)';
+              if (r.includes('地坪') && (r.includes('出入') || r.includes('異常'))) return '🟢 內網已上架 (地坪出入)';
+              return '🟢 內部網頁已上架';
+            }
             case 'NOT_FOUND': return '🔴 查無外網資料';
             case 'PRICE_MISMATCH': return '🟡 價格不一致';
             case 'SPEC_MISMATCH': return '🟠 規格不符';
@@ -510,10 +516,16 @@
           }
         }
 
-        function statusBadgeClass(status) {
+        function statusBadgeClass(status, item) {
           switch (status) {
             case 'NORMAL': return 'bg-emerald-100 text-emerald-800';
-            case 'INTERNAL_ACTIVE': return 'bg-emerald-600 text-white shadow-sm';
+            case 'INTERNAL_ACTIVE': {
+              const r = item?.diff_reason || '';
+              if (r.includes('異常') || r.includes('出入') || r.includes('不一致')) {
+                return 'bg-emerald-700 text-amber-200 border border-amber-300 shadow-sm';
+              }
+              return 'bg-emerald-600 text-white shadow-sm';
+            }
             case 'NOT_FOUND': return 'bg-red-100 text-red-800';
             case 'PRICE_MISMATCH': return 'bg-amber-100 text-amber-800';
             case 'SPEC_MISMATCH': return 'bg-orange-100 text-orange-800';
@@ -549,18 +561,31 @@
           const addrB = clean(b.t591_address || '');
 
           if (isLandA) {
-            // 土地比對：同地址/段名且地坪差距 <= 1.5 坪
+            // 土地比對：同地址/段名且地坪差距 <= 1.5 坪，或同段名同總價
+            const sameAddr = (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA)));
+            if (!sameAddr) return false;
             const areaDiff = Math.abs((parseFloat(a.t591_area) || 0) - (parseFloat(b.t591_area) || 0));
-            return (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA))) && (areaDiff <= 1.5);
+            if (areaDiff <= 1.5) return true;
+            const priceA = parseFloat(a.t591_price) || 0;
+            const priceB = parseFloat(b.t591_price) || 0;
+            return (priceA > 0 && priceB > 0 && Math.abs(priceA - priceB) <= 20.0);
           } else {
-            // 成屋比對：同地址、同樓層且建坪差距 <= 1.0 坪
+            // 成屋比對：同地址、同樓層
             const fA = String(a.t591_floor || '').trim();
             const fB = String(b.t591_floor || '').trim();
             const sameFloor = (fA === fB) || (fA.includes('整棟') && fB.includes('整棟'));
             if (!sameFloor) return false;
 
+            const sameAddr = (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA)));
+            if (!sameAddr) return false;
+
             const areaDiff = Math.abs((parseFloat(a.t591_area) || 0) - (parseFloat(b.t591_area) || 0));
-            return (addrA && addrB && (addrA === addrB || addrA.includes(addrB) || addrB.includes(addrA))) && (areaDiff <= 1.0);
+            if (areaDiff <= 1.0) return true;
+
+            // 特徵容錯：若地址相同、樓層相同、開價完全相同(差距 <= 20萬)，即使建坪有輸入錯誤(如 50385 vs 50.8)，亦判定為同一物件
+            const priceA = parseFloat(a.t591_price) || 0;
+            const priceB = parseFloat(b.t591_price) || 0;
+            return (priceA > 0 && priceB > 0 && Math.abs(priceA - priceB) <= 20.0);
           }
         }
 
@@ -662,11 +687,20 @@
 
             // 2. 批次更新 compare_items 表中所有相同的刊登物件
             const typeLabel = isLand ? '土地物件' : '在庫物件';
-            const newReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 查驗狀態：確認物件存在於I智慧內部 (${typeLabel})\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁確認已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。`;
+            const baseArea = parseFloat(item.t591_area) || 0;
 
-            const placeholders = matchedIds.map(() => '?').join(',');
-            const updateItemSql = `UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = 'I智慧確認' WHERE id IN (${placeholders});`;
-            await queryTurso(updateItemSql, [newReason, ...matchedIds]);
+            for (const it of matchedItems) {
+              const itArea = parseFloat(it.t591_area) || 0;
+              let itemReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 查驗狀態：確認物件存在於I智慧內部 (${typeLabel})\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁確認已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。`;
+
+              if (baseArea > 0 && itArea > 0 && Math.abs(baseArea - itArea) > 1.5) {
+                itemReason = `🟢 內部網頁已上架 (建坪條件異常提示)\n• 異常警示：⚠️ 外網刊登【建坪 ${itArea} 坪】數值異常！(同仁確認內網登記約為 ${baseArea} 坪，請留意更正)\n• 查驗狀態：確認物件存在於I智慧內部 (${typeLabel})\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件經多維特徵判定已在庫，但此筆廣告建坪登打有誤，請同仁留意。`;
+              }
+              await queryTurso("UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = 'I智慧確認' WHERE id = ?;", [itemReason, it.id]);
+              it.status = 'INTERNAL_ACTIVE';
+              it.diff_reason = itemReason;
+              it.matched_case_sid = 'I智慧確認';
+            }
 
             // 3. 更新 compare_reports 計數 (依實際受影響的筆數精準增減)
             if (report.value && report.value.report_id && countToChange > 0) {
@@ -675,13 +709,6 @@
                 [countToChange, countToChange, report.value.report_id]
               );
             }
-
-            // 4. 即時更新本機 Vue 響應式狀態 (所有相同物業的卡片同步連動切換)
-            matchedItems.forEach(it => {
-              it.status = 'INTERNAL_ACTIVE';
-              it.diff_reason = newReason;
-              it.matched_case_sid = 'I智慧確認';
-            });
 
             modalItem.value = null;
           } catch (err) {

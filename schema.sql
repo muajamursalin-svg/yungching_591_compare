@@ -187,6 +187,7 @@ CREATE INDEX IF NOT EXISTS idx_compare_items_report ON compare_items (report_id,
 -- 使用者常用店鋪網址記憶表 (提供 LINE Bot 一鍵快捷查詢與累積次數統計)
 CREATE TABLE IF NOT EXISTS user_saved_shops (
     user_id TEXT PRIMARY KEY,          -- LINE 使用者唯一 ID (Uxxxxxxxx...)
+    user_name TEXT DEFAULT NULL,       -- LINE 使用者名稱 / 同仁姓名 (例如 楊忠諺)
     url_591 TEXT DEFAULT NULL,          -- 591 店鋪完整網址
     count_591 INTEGER DEFAULT 0,       -- 591 累積查詢次數
     url_5168 TEXT DEFAULT NULL,         -- 5168 店鋪完整網址

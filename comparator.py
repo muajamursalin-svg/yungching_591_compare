@@ -253,6 +253,9 @@ class InventoryComparator:
                     h_fp = generate_property_fingerprint(c1, d1, h_sec or st1, 0, p1, h_land_area, is_land=True)
                     for item in internal_list:
                         matched_int = False
+                        anomaly_msg = ""
+                        header_str = "🟢 內部網頁已上架 (同仁手動回報・全員共享)"
+                        
                         if item.get("property_fingerprint") == h_fp:
                             matched_int = True
                         else:
@@ -264,15 +267,28 @@ class InventoryComparator:
                                 if (h_sec and it_sec and h_sec == it_sec) or (st1 in it_s or it_s in st1):
                                     it_p = float(item.get("price") or 0.0)
                                     it_a = float(item.get("reg_area") or 0.0)
-                                    if abs(p1 - it_p) <= 50.0 and abs(h_land_area - it_a) <= 2.0:
+                                    diff_price = abs(p1 - it_p)
+                                    diff_area = abs(h_land_area - it_a)
+
+                                    if diff_price <= 50.0 and diff_area <= 2.0:
                                         matched_int = True
+                                    elif diff_price <= 50.0 and diff_area > 2.0:
+                                        matched_int = True
+                                        header_str = "🟢 內部網頁已上架 (地坪出入提示)"
+                                        anomaly_msg = f"• 異常警示：⚠️ 外網刊登【地坪 {h_land_area} 坪】與內網【{it_a} 坪】出入\n"
+                                    elif diff_area <= 2.0 and diff_price > 50.0:
+                                        matched_int = True
+                                        header_str = "🟢 內部網頁已上架 (開價出入提示)"
+                                        p_delta = round(p1 - it_p, 2)
+                                        anomaly_msg = f"• 異常警示：⚠️ 外網開價【{p1} 萬】與內網【{it_p} 萬】不一致 (價差 {p_delta} 萬)\n"
 
                         if matched_int:
                             rep_time = item.get("created_at") or "近期"
                             rep_user = item.get("reported_by") or "店頭同仁"
                             disp_sec = h_sec or "段名相符"
                             reason = (
-                                f"🟢 內部網頁已上架 (同仁手動回報・全員共享)\n"
+                                f"{header_str}\n"
+                                f"{anomaly_msg}"
                                 f"• 物件類別：土地 ({disp_sec}｜地坪 {h_land_area}坪)\n"
                                 f"• 查驗狀態：確認物件存在於I智慧內部 (由 {rep_user} 查核確認)\n"
                                 f"• 回報時間：{rep_time}\n"
@@ -463,11 +479,14 @@ class InventoryComparator:
                 h_fp = generate_property_fingerprint(c1, d1, st1, f1, p1, a1)
                 for item in internal_list:
                     matched_internal = False
+                    anomaly_msg = ""
+                    header_str = "🟢 內部網頁已上架 (同仁手動回報・全員共享)"
+
                     # 1. 指紋完全吻合
                     if item.get("property_fingerprint") == h_fp:
                         matched_internal = True
                     else:
-                        # 2. 核心特徵比對 (縣市、路名/區域、樓層、總價差距 <= 50萬、坪數差距 <= 1.5坪)
+                        # 2. 核心特徵比對 (縣市、路名/社區/區域、樓層)
                         it_c = clean_text(item.get("county") or "").replace('臺', '台')
                         it_s = clean_text(item.get("street") or "").replace('臺', '台')
                         it_d = clean_text(item.get("district") or "").replace('臺', '台')
@@ -476,15 +495,29 @@ class InventoryComparator:
 
                         if it_c == c1_n:
                             st_match_int = bool(st1_n and (st1_n in it_s or it_s in st1_n))
+                            comm_match_int = bool(comm1 and item.get("case_name") and (comm1 in clean_text(item.get("case_name")) or clean_text(item.get("case_name")) in comm1))
                             dist_match_int = bool(d1 and it_d and d1 == it_d)
-                            if st_match_int or dist_match_int:
+
+                            if (st_match_int or comm_match_int) and dist_match_int:
                                 it_f = int(item.get("floor") or 0)
                                 f_ok = (f1 == it_f) or (f1 in [0, 99, -1] and it_f in [0, 99, -1])
                                 if f_ok:
                                     it_p = float(item.get("price") or 0.0)
                                     it_a = float(item.get("reg_area") or 0.0)
-                                    if abs(p1 - it_p) <= 50.0 and abs(a1 - it_a) <= 1.5:
+                                    diff_price = abs(p1 - it_p)
+                                    diff_area = abs(a1 - it_a)
+
+                                    if diff_price <= 50.0 and diff_area <= 1.5:
                                         matched_internal = True
+                                    elif diff_price <= 50.0 and diff_area > 1.5:
+                                        matched_internal = True
+                                        header_str = "🟢 內部網頁已上架 (建坪條件異常提示)"
+                                        anomaly_msg = f"• 異常警示：⚠️ 外網刊登【建坪 {a1} 坪】數值異常！(內網登記為 {it_a} 坪，請留意更正)\n"
+                                    elif diff_area <= 1.5 and diff_price > 50.0:
+                                        matched_internal = True
+                                        header_str = "🟢 內部網頁已上架 (開價出入提示)"
+                                        p_delta = round(p1 - it_p, 2)
+                                        anomaly_msg = f"• 異常警示：⚠️ 外網刊登開價【{p1} 萬】與內網【{it_p} 萬】不一致 (價差 {p_delta} 萬)\n"
 
                     if matched_internal:
                         case_no = item.get("internal_case_no") or "已查驗在庫"
@@ -494,7 +527,8 @@ class InventoryComparator:
                         notes_str = f"\n• 備註說明：{notes}" if notes else ""
 
                         reason = (
-                            f"🟢 內部網頁已上架 (同仁手動回報・全員共享)\n"
+                            f"{header_str}\n"
+                            f"{anomaly_msg}"
                             f"• 內網案號：{case_no}\n"
                             f"• 回報時間：{rep_time} (由 {rep_user} 確認上架)\n"
                             f"• 說明：此物件在外網雖查無資料，但經同仁查驗已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。{notes_str}"

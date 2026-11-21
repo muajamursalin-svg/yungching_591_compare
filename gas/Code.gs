@@ -147,8 +147,9 @@ function doPost(e) {
             continue;
           }
 
-          // 1. 更新資料庫並累加次數
-          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, true);
+          // 1. 更新資料庫並累加次數 (同時記錄真實姓名)
+          const userName = getLineUserName(lineToken, userId);
+          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, true, userName);
           // 2. 鎖定並觸發 GitHub Actions
           acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
           const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
@@ -157,11 +158,13 @@ function doPost(e) {
           const latestShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const qr = buildQuickReply(latestShops);
           const count = getShopCount(latestShops, platform);
+          const userLabel = (latestShops && latestShops.user_name) ? latestShops.user_name : (userName || "同仁");
 
           replyLineMessage(lineToken, replyToken,
             `✅ 已為您更新 ${platform} 預設店鋪為新網址！\n\n` +
+            `👤 使用者: ${userLabel}\n` +
             `📍 店鋪代號: ${shopId}\n` +
-            `📈 累積查詢: 第 ${count} 次\n` +
+            `📈 個人累計查詢: 第 ${count} 次\n` +
             `⏳ 系統現正同步最新庫存並進行多維特徵比對...\n\n` +
             `比對完成後將會主動發送推播報告通知您！`,
             qr
@@ -184,16 +187,22 @@ function doPost(e) {
             continue;
           }
 
-          // 僅單次比對，不更動預設資料庫
+          // 僅單次比對，不更動預設店鋪，但無差別累加使用者平台查詢次數
+          const userName = getLineUserName(lineToken, userId);
+          incrementShopCount(tursoUrl, tursoToken, userId, platform, userName);
           acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
           const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
           if (!ghaOk) releaseUserQueryLock(tursoUrl, tursoToken, userId);
           const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const qr = buildQuickReply(userShops);
+          const count = getShopCount(userShops, platform);
+          const userLabel = (userShops && userShops.user_name) ? userShops.user_name : (userName || "同仁");
 
           replyLineMessage(lineToken, replyToken,
-            `⚡ 收到！本次僅作單次比對（未變更您的預設店鋪）。\n\n` +
+            `⚡ 收到！本次為【單次比對】（未變更您的預設店鋪）。\n\n` +
+            `👤 使用者: ${userLabel}\n` +
             `📍 ${platform} 店鋪代號: ${shopId}\n` +
+            `📈 個人累計查詢: 第 ${count} 次\n` +
             `⏳ 系統現正進行庫存比對，完成後將推播報告通知您！`,
             qr
           );
@@ -228,11 +237,13 @@ function doPost(e) {
             continue;
           }
 
-          // 遞增查詢次數
-          incrementShopCount(tursoUrl, tursoToken, userId, reqPlatform);
+          // 遞增查詢次數 (全管道通用計數並記錄真實姓名)
+          const userName = getLineUserName(lineToken, userId);
+          incrementShopCount(tursoUrl, tursoToken, userId, reqPlatform, userName);
           userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const newCnt = getShopCount(userShops, reqPlatform);
           const qr = buildQuickReply(userShops);
+          const userLabel = (userShops && userShops.user_name) ? userShops.user_name : (userName || "同仁");
 
           // 萃取 shopId
           const shopId = extractShopIdFromUrl(targetUrl, reqPlatform);
@@ -273,7 +284,8 @@ function doPost(e) {
               cachedReport.not_found_count,
               cachedReport.price_diff_count,
               cachedReport.spec_diff_count,
-              true
+              true,
+              userLabel
             );
 
             replyLineMessage(lineToken, replyToken,
@@ -290,8 +302,9 @@ function doPost(e) {
           if (ghaSuccess) {
             replyLineMessage(lineToken, replyToken, 
               `✅ 收到！已啟動 ${reqPlatform} 庫存比對任務\n\n` +
+              `👤 使用者: ${userLabel}\n` +
               `📍 店鋪代號: ${shopId}\n` +
-              `📈 累積查詢: 第 ${newCnt} 次\n` +
+              `📈 個人累計查詢: 第 ${newCnt} 次\n` +
               `⏳ 系統正在同步 ${reqPlatform} 與永慶分店庫存並進行比對（約需 30~45 秒）...\n\n` +
               `比對完成後將會主動推播報告給您！`,
               qr
@@ -395,10 +408,12 @@ function doPost(e) {
 
           // ── 情境 A & B：初次輸入儲存，或輸入與既有相同網址 ──
           const isFirstTime = !savedUrl;
-          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, userMsg, true);
+          const userName = getLineUserName(lineToken, userId);
+          saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, userMsg, true, userName);
           userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const currentCount = getShopCount(userShops, platform);
           const qr = buildQuickReply(userShops);
+          const userLabel = (userShops && userShops.user_name) ? userShops.user_name : (userName || "同仁");
 
           // 檢查永慶分店庫存同步鎖
           const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
@@ -423,7 +438,8 @@ function doPost(e) {
               cachedReport.not_found_count,
               cachedReport.price_diff_count,
               cachedReport.spec_diff_count,
-              true
+              true,
+              userLabel
             );
 
             replyLineMessage(lineToken, replyToken,
@@ -441,8 +457,9 @@ function doPost(e) {
             const memoryTip = isFirstTime ? `💡 系統已自動為您記憶此店鋪，未來可直接點選下方按鈕一鍵查詢！\n\n` : "";
             replyLineMessage(lineToken, replyToken, 
               `✅ 收到！已成功啟動 ${platform} 庫存比對任務\n\n` +
+              `👤 使用者: ${userLabel}\n` +
               `📍 店鋪代號: ${shopId}\n` +
-              `📈 累積查詢: 第 ${currentCount} 次\n` +
+              `📈 個人累計查詢: 第 ${currentCount} 次\n` +
               memoryTip +
               `⏳ 系統正在同步 ${platform} 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
               `比對完成後將會主動發送推播報告通知您！`,
@@ -524,9 +541,31 @@ function getUserSavedShops(tursoUrl, tursoToken, userId) {
 }
 
 /**
- * 儲存或更新使用者的店鋪網址並遞增累積次數
+ * 取得 LINE 使用者真實暱稱/姓名
  */
-function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, incrementCount) {
+function getLineUserName(lineToken, userId) {
+  if (!lineToken || !userId) return "";
+  try {
+    const url = "https://api.line.me/v2/bot/profile/" + encodeURIComponent(userId);
+    const resp = UrlFetchApp.fetch(url, {
+      method: "get",
+      headers: { "Authorization": "Bearer " + lineToken },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() === 200) {
+      const data = JSON.parse(resp.getContentText());
+      return data.displayName || "";
+    }
+  } catch (err) {
+    console.warn("getLineUserName failed: " + err);
+  }
+  return "";
+}
+
+/**
+ * 儲存或更新使用者的店鋪網址並遞增累積次數 (同時記錄真實姓名)
+ */
+function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, incrementCount, userName) {
   if (!tursoUrl || !tursoToken || !userId || !platform || !shopUrl) return;
   try {
     const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
@@ -545,9 +584,10 @@ function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, i
     const countInc = incrementCount ? 1 : 0;
 
     const sql = `
-      INSERT INTO user_saved_shops (user_id, ${urlCol}, ${countCol}, updated_at)
-      VALUES (?, ?, 1, ?)
+      INSERT INTO user_saved_shops (user_id, user_name, ${urlCol}, ${countCol}, updated_at)
+      VALUES (?, ?, ?, 1, ?)
       ON CONFLICT(user_id) DO UPDATE SET
+        user_name = COALESCE(excluded.user_name, user_saved_shops.user_name),
         ${urlCol} = excluded.${urlCol},
         ${countCol} = COALESCE(${countCol}, 0) + ${countInc},
         updated_at = excluded.updated_at;
@@ -561,6 +601,7 @@ function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, i
             sql: sql,
             args: [
               { type: "text", value: userId },
+              userName ? { type: "text", value: userName } : { type: "null" },
               { type: "text", value: shopUrl },
               { type: "text", value: nowStr }
             ]
@@ -582,16 +623,23 @@ function saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, i
 }
 
 /**
- * 遞增指定平台的查詢次數
+ * 遞增指定平台的查詢次數 (全管道通用計數，同時更新真實姓名)
  */
-function incrementShopCount(tursoUrl, tursoToken, userId, platform) {
+function incrementShopCount(tursoUrl, tursoToken, userId, platform, userName) {
   if (!tursoUrl || !tursoToken || !userId || !platform) return;
   try {
     const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
     const nowStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd HH:mm:ss");
     let countCol = platform === "5168" ? "count_5168" : (platform === "rakuya" ? "count_rakuya" : "count_591");
     
-    const sql = `UPDATE user_saved_shops SET ${countCol} = COALESCE(${countCol}, 0) + 1, updated_at = ? WHERE user_id = ?;`;
+    const sql = `
+      INSERT INTO user_saved_shops (user_id, user_name, ${countCol}, updated_at)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        user_name = COALESCE(excluded.user_name, user_saved_shops.user_name),
+        ${countCol} = COALESCE(${countCol}, 0) + 1,
+        updated_at = excluded.updated_at;
+    `;
     const payload = {
       requests: [
         {
@@ -599,8 +647,9 @@ function incrementShopCount(tursoUrl, tursoToken, userId, platform) {
           stmt: {
             sql: sql,
             args: [
-              { type: "text", value: nowStr },
-              { type: "text", value: userId }
+              { type: "text", value: userId },
+              userName ? { type: "text", value: userName } : { type: "null" },
+              { type: "text", value: nowStr }
             ]
           }
         },
@@ -1062,7 +1111,7 @@ function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
 /**
  * 產生包含打勾符號與結構化排版的比對摘要文字
  */
-function formatCompareSummaryText(platform, shopId, currentCount, total, matched, notFound, priceDiff, specDiff, isCache) {
+function formatCompareSummaryText(platform, shopId, currentCount, total, matched, notFound, priceDiff, specDiff, isCache, userName) {
   const platDisplay = platform === "5168" ? "5168 房仲店鋪" : (platform === "rakuya" ? "樂屋網 VIP 店鋪" : "591 店鋪");
   const abnormal = (parseInt(notFound) || 0) + (parseInt(priceDiff) || 0) + (parseInt(specDiff) || 0);
   const cacheNote = isCache ? "（距前次比對未滿 1 分鐘，回傳最新快取紀錄）\n\n" : "";
@@ -1080,11 +1129,13 @@ function formatCompareSummaryText(platform, shopId, currentCount, total, matched
       `  • 📐 規格不符提示：${specDiff || 0} 件 (樓層/規格出入)`;
   }
 
-  const countStr = currentCount ? `📈 累積查詢：第 ${currentCount} 次\n` : "";
+  const userStr = userName ? `👤 使用者：${userName}\n` : "";
+  const countStr = currentCount ? `📈 個人累計：第 ${currentCount} 次\n` : "";
 
   return (
     `${cacheNote}` +
     `🏢 比對平台：${platDisplay}\n` +
+    userStr +
     `📍 店鋪代號：${shopId}\n` +
     countStr +
     `📦 在庫總數：${total} 件\n\n` +

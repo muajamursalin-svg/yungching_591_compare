@@ -159,13 +159,16 @@ def build_interactive_message(db_client: Optional[TursoClient], user_id: str, me
 
     return flex_msg
 
-def format_compare_summary(platform: str, shop_id: str, total: int, matched: int, not_found: int, price_diff: int, spec_diff: int, internal_active: int = 0, is_cache: bool = False) -> str:
+def format_compare_summary(platform: str, shop_id: str, total: int, matched: int, not_found: int, price_diff: int, spec_diff: int, internal_active: int = 0, is_cache: bool = False, user_name: str = "", user_count: int = 0) -> str:
     """產生包含清晰打勾符號與分隔區塊的精美比對報告文字"""
     plat_display = "5168 房仲店鋪" if platform == "5168" else ("樂屋網 VIP 店鋪" if platform == "rakuya" else "591 店鋪")
     abnormal = not_found + price_diff + spec_diff
     cache_note = "（距前次比對未滿 1 分鐘，回傳最新快取紀錄）\n\n" if is_cache else ""
 
     internal_note = f"\n✔ 🟢 內網已在庫：{internal_active} 件 (同仁回報確認)" if internal_active > 0 else ""
+
+    user_info = f"👤 使用者：{user_name}\n" if user_name else ""
+    cnt_info = f"📈 個人累計：第 {user_count} 次\n" if user_count > 0 else ""
 
     if abnormal == 0:
         abnormal_detail = "  🎉 太棒了！全部物件皆與分店一致，未發現任何異常 ✔"
@@ -181,7 +184,9 @@ def format_compare_summary(platform: str, shop_id: str, total: int, matched: int
     return (
         f"{cache_note}"
         f"🏢 比對平台：{plat_display}\n"
+        f"{user_info}"
         f"📍 店鋪代號：{shop_id}\n"
+        f"{cnt_info}"
         f"📦 在庫總數：{total} 件\n\n"
         f"【📊 庫存比對結果總覽】\n"
         f"✔ 🟢 正常在售：{matched} 件 (與外網分店相符){internal_note}\n"
@@ -312,6 +317,12 @@ def main():
         crawler_591 = T591ShopCrawler(db)
         shop_id = crawler_591.extract_shop_id(shop_input)
 
+    # 查詢使用者姓名與個人累積查詢次數
+    user_saved_row = db.execute("SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;", [user_id]) if (db and user_id) else []
+    u_name = user_saved_row[0].get("user_name") or "" if user_saved_row else ""
+    cnt_col = f"count_{platform}"
+    u_cnt = int(user_saved_row[0].get(cnt_col) or 0) if user_saved_row else 0
+
     # 2. 檢查 1 分鐘內快取
     cached_rpt = comparator.check_recent_cache(shop_id, platform=platform, user_id=user_id, max_seconds=60)
     if cached_rpt:
@@ -332,7 +343,9 @@ def main():
             price_diff=price_diff,
             spec_diff=spec_diff,
             internal_active=internal_active,
-            is_cache=True
+            is_cache=True,
+            user_name=u_name,
+            user_count=u_cnt
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
         send_line_push_notification(user_id, summary_msg, liff_url=liff_target_url, db_client=db)
@@ -376,6 +389,11 @@ def main():
         spec_diff = r.get("spec_diff_count", 0)
         internal_active = r.get("internal_active_count", 0)
 
+        # 再次更新個人累計次數資訊以反映最新狀態
+        fresh_user_row = db.execute("SELECT * FROM user_saved_shops WHERE user_id = ? LIMIT 1;", [user_id]) if (db and user_id) else []
+        fresh_cnt = int(fresh_user_row[0].get(cnt_col) or u_cnt) if fresh_user_row else u_cnt
+        fresh_name = fresh_user_row[0].get("user_name") or u_name if fresh_user_row else u_name
+
         summary_msg = format_compare_summary(
             platform=platform,
             shop_id=shop_id,
@@ -385,7 +403,9 @@ def main():
             price_diff=price_diff,
             spec_diff=spec_diff,
             internal_active=internal_active,
-            is_cache=False
+            is_cache=False,
+            user_name=fresh_name,
+            user_count=fresh_cnt
         )
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
         send_line_push_notification(user_id, summary_msg, liff_url=liff_target_url, db_client=db)
