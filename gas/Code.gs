@@ -132,10 +132,27 @@ function doPost(e) {
         const shopId = params.shop_id || "";
 
         if (action === "update_shop") {
+          // 檢查使用者當前是否已有比對任務執行中 (防止重複併發查詢)
+          const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
+          if (userLock && userLock.is_locked) {
+            const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
+            const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+            const qr = buildQuickReply(userShops);
+            replyLineMessage(lineToken, replyToken,
+              `⏳ 目前查詢中 請稍後\n\n` +
+              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              qr
+            );
+            continue;
+          }
+
           // 1. 更新資料庫並累加次數
           saveOrUpdateUserShop(tursoUrl, tursoToken, userId, platform, shopUrl, true);
-          // 2. 觸發 GitHub Actions
-          triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          // 2. 鎖定並觸發 GitHub Actions
+          acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
+          const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          if (!ghaOk) releaseUserQueryLock(tursoUrl, tursoToken, userId);
           // 3. 取得最新按鈕並回覆
           const latestShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const qr = buildQuickReply(latestShops);
@@ -152,8 +169,25 @@ function doPost(e) {
           continue;
 
         } else if (action === "once_compare") {
+          // 檢查使用者當前是否已有比對任務執行中
+          const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
+          if (userLock && userLock.is_locked) {
+            const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
+            const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+            const qr = buildQuickReply(userShops);
+            replyLineMessage(lineToken, replyToken,
+              `⏳ 目前查詢中 請稍後\n\n` +
+              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              qr
+            );
+            continue;
+          }
+
           // 僅單次比對，不更動預設資料庫
-          triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
+          const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
+          if (!ghaOk) releaseUserQueryLock(tursoUrl, tursoToken, userId);
           const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
           const qr = buildQuickReply(userShops);
 
@@ -203,6 +237,19 @@ function doPost(e) {
           // 萃取 shopId
           const shopId = extractShopIdFromUrl(targetUrl, reqPlatform);
 
+          // 檢查使用者當前是否已有比對任務執行中 (防止重複併發查詢)
+          const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
+          if (userLock && userLock.is_locked) {
+            const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
+            replyLineMessage(lineToken, replyToken,
+              `⏳ 目前查詢中 請稍後\n\n` +
+              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              qr
+            );
+            continue;
+          }
+
           // 檢查永慶分店同步鎖
           const syncLock = checkBranchSyncLock(tursoUrl, tursoToken);
           if (syncLock && syncLock.is_locked) {
@@ -238,7 +285,8 @@ function doPost(e) {
             continue;
           }
 
-          // 觸發 GitHub Actions
+          // 鎖定並觸發 GitHub Actions
+          acquireUserQueryLock(tursoUrl, tursoToken, userId, reqPlatform, shopId);
           const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, targetUrl, userId, reqPlatform);
           if (ghaSuccess) {
             replyLineMessage(lineToken, replyToken, 
@@ -250,6 +298,7 @@ function doPost(e) {
               qr
             );
           } else {
+            releaseUserQueryLock(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken, 
               `⚠️ 觸發比對排程失敗，請檢查 GitHub Token 設定。`,
               qr
@@ -282,6 +331,20 @@ function doPost(e) {
         }
 
         if (platform && shopId) {
+          // 檢查使用者當前是否已有比對任務執行中 (防止重複併發查詢)
+          const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
+          if (userLock && userLock.is_locked) {
+            const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
+            const qr = buildQuickReply(userShops);
+            replyLineMessage(lineToken, replyToken,
+              `⏳ 目前查詢中 請稍後\n\n` +
+              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              qr
+            );
+            continue;
+          }
+
           // 檢查既有已存的該平台網址
           let savedUrl = "";
           if (platform === "591") savedUrl = userShops?.url_591 || "";
@@ -373,7 +436,8 @@ function doPost(e) {
             continue;
           }
 
-          // 觸發 GitHub Actions
+          // 鎖定並觸發 GitHub Actions
+          acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
           const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId, platform);
           if (ghaSuccess) {
             const memoryTip = isFirstTime ? `💡 系統已自動為您記憶此店鋪，未來可直接點選下方按鈕一鍵查詢！\n\n` : "";
@@ -387,6 +451,7 @@ function doPost(e) {
               qr
             );
           } else {
+            releaseUserQueryLock(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken, 
               `⚠️ 抱歉，觸發比對排程時發生錯誤，請檢查 GitHub Token 設定。`,
               qr
@@ -857,4 +922,137 @@ function replyLineMessage(token, replyToken, text, quickReply) {
   };
 
   UrlFetchApp.fetch(url, options);
+}
+
+// ───────────────────────────────────────────────
+// 使用者查詢鎖定控制 (防止重複併發查詢)
+// ───────────────────────────────────────────────
+
+/**
+ * 檢查使用者當前是否已有正在執行的比對任務
+ */
+function checkUserQueryLock(tursoUrl, tursoToken, userId) {
+  if (!tursoUrl || !tursoToken || !userId) return null;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const sql = "SELECT user_id, is_running, platform, shop_id, locked_at FROM user_query_locks WHERE user_id = ? LIMIT 1;";
+    const payload = {
+      requests: [
+        { type: "execute", stmt: { sql: sql, args: [{ type: "text", value: userId }] } },
+        { type: "close" }
+      ]
+    };
+    const res = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) return null;
+    const data = JSON.parse(res.getContentText());
+    const result = data.results[0]?.response?.result;
+    if (!result || !result.rows || result.rows.length === 0) return null;
+
+    const cols = result.cols.map(c => c.name);
+    const row = result.rows[0];
+    const lockObj = {};
+    cols.forEach((col, idx) => { lockObj[col] = row[idx].value; });
+
+    if (parseInt(lockObj.is_running) === 1) {
+      // 逾時防護：若超過 180 秒 (3 分鐘) 視為逾時自動解鎖，避免意外中斷產生死鎖
+      if (lockObj.locked_at) {
+        const lockedTime = new Date(lockObj.locked_at.replace(" ", "T") + "+08:00").getTime();
+        const now = new Date().getTime();
+        const diffSec = (now - lockedTime) / 1000;
+        if (diffSec > 180) {
+          console.warn("User query lock expired (>180s), ignoring.");
+          return null;
+        }
+      }
+      return {
+        is_locked: true,
+        platform: lockObj.platform || "",
+        shop_id: lockObj.shop_id || ""
+      };
+    }
+  } catch (err) {
+    console.warn("checkUserQueryLock failed: " + err);
+  }
+  return null;
+}
+
+/**
+ * 取得使用者比對任務鎖定 (標記 is_running = 1)
+ */
+function acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId) {
+  if (!tursoUrl || !tursoToken || !userId) return;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const nowStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd HH:mm:ss");
+    const sql = `
+      INSERT INTO user_query_locks (user_id, is_running, platform, shop_id, locked_at)
+      VALUES (?, 1, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        is_running = 1,
+        platform = excluded.platform,
+        shop_id = excluded.shop_id,
+        locked_at = excluded.locked_at;
+    `;
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: {
+            sql: sql,
+            args: [
+              { type: "text", value: userId },
+              { type: "text", value: platform || "" },
+              { type: "text", value: shopId ? shopId.toString() : "" },
+              { type: "text", value: nowStr }
+            ]
+          }
+        },
+        { type: "close" }
+      ]
+    };
+    UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.warn("acquireUserQueryLock failed: " + err);
+  }
+}
+
+/**
+ * 釋放使用者比對任務鎖定 (標記 is_running = 0)
+ */
+function releaseUserQueryLock(tursoUrl, tursoToken, userId) {
+  if (!tursoUrl || !tursoToken || !userId) return;
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    const sql = "UPDATE user_query_locks SET is_running = 0 WHERE user_id = ?;";
+    const payload = {
+      requests: [
+        {
+          type: "execute",
+          stmt: {
+            sql: sql,
+            args: [{ type: "text", value: userId }]
+          }
+        },
+        { type: "close" }
+      ]
+    };
+    UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.warn("releaseUserQueryLock failed: " + err);
+  }
 }

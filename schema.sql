@@ -194,3 +194,12 @@ CREATE TABLE IF NOT EXISTS user_saved_shops (
     count_rakuya INTEGER DEFAULT 0,    -- 樂屋網 累積查詢次數
     updated_at TEXT NOT NULL           -- 最新更新時間 (台灣時間)
 );
+
+-- 使用者比對任務執行鎖定表 (確保使用者一次只能執行一個比對任務，防止重複點擊併發)
+CREATE TABLE IF NOT EXISTS user_query_locks (
+    user_id TEXT PRIMARY KEY,          -- LINE 使用者 ID
+    is_running INTEGER DEFAULT 0,      -- 是否正在執行中 (1: 執行中, 0: 空閒)
+    platform TEXT,                     -- 當前執行平台 ('591', '5168', 'rakuya')
+    shop_id TEXT,                      -- 當前執行店鋪代號
+    locked_at TEXT                     -- 鎖定時間 (台灣時間)
+);

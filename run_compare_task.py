@@ -105,6 +105,19 @@ def send_line_push_notification(user_id: str, message: str, liff_url: str = "", 
     except Exception as e:
         print(f"[Error] 發送 LINE 推播發生錯誤: {e}")
 
+def release_user_query_lock(db_client: TursoClient, user_id: str):
+    """解除使用者當前查詢併發鎖定"""
+    if not db_client or not user_id:
+        return
+    try:
+        db_client.execute(
+            "UPDATE user_query_locks SET is_running = 0 WHERE user_id = ?;",
+            [user_id]
+        )
+        print(f"🔓 [UserLock] 已成功釋放使用者 {user_id} 查詢鎖定。")
+    except Exception as e:
+        print(f"[Warn] 釋放使用者查詢鎖定失敗: {e}")
+
 def main():
     payload = {}
     raw_payload = os.environ.get("EVENT_PAYLOAD")
@@ -158,6 +171,7 @@ def main():
         lock_msg = sync_lock.get("message") or "目前刷新分店庫存中 請五分鐘後再查詢"
         print(f"[Notice] 系統正在刷新永慶分店庫存中，暫停比對任務: {lock_msg}")
         send_line_push_notification(user_id, f"⚠️ {lock_msg}")
+        release_user_query_lock(db, user_id)
         return
 
     # 1. 根據平台萃取店鋪 ID / 帳號
@@ -197,6 +211,7 @@ def main():
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
         qr = build_line_quick_reply(db, user_id)
         send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
+        release_user_query_lock(db, user_id)
         return
 
     # 3. 爬取最新庫存並轉換為標準格式
@@ -242,6 +257,7 @@ def main():
         liff_target_url = f"{liff_base}?report_id={report_id}" if liff_base else ""
         qr = build_line_quick_reply(db, user_id)
         send_line_push_notification(user_id, summary_msg, liff_target_url, quick_reply=qr)
+        release_user_query_lock(db, user_id)
 
 if __name__ == "__main__":
     try:
@@ -251,7 +267,7 @@ if __name__ == "__main__":
         err_detail = traceback.format_exc()
         print(f"[FATAL ERROR IN RUN_COMPARE_TASK]\n{err_detail}", file=sys.stderr)
         
-        # 嘗試推播失敗訊息給使用者
+        # 嘗試推播失敗訊息給使用者並釋放查詢鎖
         try:
             raw_payload = os.environ.get("EVENT_PAYLOAD")
             payload = json.loads(raw_payload) if raw_payload else {}
@@ -263,6 +279,11 @@ if __name__ == "__main__":
                     user_id,
                     f"⚠️ 店鋪比對執行異常：\n{str(e)}\n\n請檢查店鋪網址或稍後再試。"
                 )
+                try:
+                    db_fallback = TursoClient()
+                    release_user_query_lock(db_fallback, user_id)
+                except Exception:
+                    pass
         except Exception as notify_err:
             print(f"[Warn] 發送失敗推播失敗: {notify_err}")
         sys.exit(1)

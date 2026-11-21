@@ -193,9 +193,6 @@ class T591ShopCrawler:
         將 591 原始案件資料轉換為跨平台通用 StandardHouse 規格
         """
         standard_list = []
-        # 1.5 清理既有店鋪快照，避免已下架物件殘留
-        self.db.execute("DELETE FROM t591_houses WHERE shop_id = ?;", [shop_id])
-
         for h in houses:
             hid = str(h.get("id"))
             p_val = T591ShopCrawler.parse_price(h.get("price", ""))
