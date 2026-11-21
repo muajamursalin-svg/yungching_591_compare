@@ -157,13 +157,35 @@ class RakuyaShopCrawler:
             area_m = re.search(r'<span>\s*([\d\.]+)坪\s*</span>', raw_item)
             reg_area = float(area_m.group(1)) if area_m else 0.0
 
-            floor_m = re.search(r'<span>\s*(\d+|整棟)\s*/\s*(\d+)樓\s*</span>', raw_item)
+            # 支援單一樓層 (16/27樓)、整棟 (整棟/4樓)、樓中樓/多樓層區間 (16~17/27樓 或 16-17/27樓 或 16、17/27樓 或 B1~1/5樓)
+            floor_m = re.search(r'<span>\s*([B\d]+(?:\s*[-~～至到、]\s*[B\d]+)?|整棟)樓?\s*/\s*(\d+)樓?\s*</span>', raw_item)
             if floor_m:
-                f_raw = floor_m.group(1)
-                floor = 99 if f_raw == "整棟" else int(f_raw)
+                f_raw = floor_m.group(1).strip()
                 all_floor = int(floor_m.group(2))
+                if f_raw == "整棟":
+                    floor = 99
+                    to_floor = 99
+                elif any(sep in f_raw for sep in ["~", "-", "～", "至", "到", "、"]):
+                    parts = re.split(r'[-~～至到、]', f_raw)
+                    nums = []
+                    for p in parts:
+                        nm = re.search(r'\d+', p)
+                        if nm:
+                            v = int(nm.group(0))
+                            if 'B' in p.upper():
+                                v = -v
+                            nums.append(v)
+                    floor = min(nums) if nums else 0
+                    to_floor = max(nums) if nums else 0
+                else:
+                    num_m = re.search(r'\d+', f_raw)
+                    val = int(num_m.group(0)) if num_m else 0
+                    if 'B' in f_raw.upper():
+                        val = -val
+                    floor = val
+                    to_floor = val
             else:
-                floor, all_floor = 0, 0
+                floor, to_floor, all_floor = 0, 0, 0
 
             age_m = re.search(r'屋齡<b>([\d\.]+)年</b>', raw_item)
             house_age = float(age_m.group(1)) if age_m else 0.0
@@ -203,6 +225,7 @@ class RakuyaShopCrawler:
                 "reg_area": reg_area,
                 "main_area": None,
                 "floor": floor,
+                "to_floor": to_floor,
                 "all_floor": all_floor,
                 "layout": layout,
                 "room": room,

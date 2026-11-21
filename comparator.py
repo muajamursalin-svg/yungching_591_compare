@@ -140,10 +140,19 @@ class InventoryComparator:
             f2 = int(y.get("from_floor") or 0)
             to_f2 = int(y.get("to_floor") or 0)
             up_f2 = int(y.get("up_floor") or 0)
+            to_f1 = int(h.get("to_floor") or f1 or 0)
 
-            # 樓層比對 (大樓公寓嚴格一致；透天整棟相容 99、1、-1 地下車庫別墅、0 或 to_floor == up_floor)
+            # 樓層比對 (大樓公寓相容單一樓層與樓中樓區間；透天整棟相容 99、1、-1 地下車庫別墅、0 或 to_floor == up_floor)
             if f1 > 0 and f1 != 99:
-                if f1 != f2:
+                effective_to_f2 = to_f2 if to_f2 > 0 else f2
+                floor_match = (
+                    f1 == f2 or 
+                    to_f1 == effective_to_f2 or 
+                    (max(f1, f2) <= min(to_f1, effective_to_f2)) or 
+                    (f1 in range(min(f2, effective_to_f2), max(f2, effective_to_f2) + 1)) or 
+                    (f2 in range(min(f1, to_f1), max(f1, to_f1) + 1))
+                )
+                if not floor_match:
                     continue
             elif f1 == 99:
                 if f2 not in [-1, 0, 1, 99] and to_f2 != up_f2:
@@ -405,7 +414,11 @@ class InventoryComparator:
             area_val = float(h.get("reg_area") or 0.0)
             f_val = h.get("floor")
             allf_val = h.get("all_floor")
-            f_str = f"{f_val}/{allf_val}" if f_val != 99 else f"整棟/{allf_val}"
+            to_f_val = h.get("to_floor")
+            if to_f_val and to_f_val > f_val and f_val != 99:
+                f_str = f"{f_val}~{to_f_val}/{allf_val}樓"
+            else:
+                f_str = f"{f_val}/{allf_val}" if f_val != 99 else f"整棟/{allf_val}"
             comm_val = h.get("community_name") or ""
             cover_val = h.get("cover") or ""
             h_url = h.get("url") or ""
