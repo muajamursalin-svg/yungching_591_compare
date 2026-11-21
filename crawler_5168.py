@@ -8,7 +8,12 @@ from __future__ import annotations
 import re
 import time
 import json
-import requests
+try:
+    from curl_cffi import requests
+    USE_CURL_CFFI = True
+except ImportError:
+    import requests
+    USE_CURL_CFFI = False
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
@@ -29,8 +34,11 @@ class HousePrice5168Crawler:
 
     def __init__(self, db_client: Optional[TursoClient] = None, timeout: int = 15):
         self.db = db_client or TursoClient()
-        self.session = requests.Session()
-        self.session.headers.update(self.DEFAULT_HEADERS)
+        if USE_CURL_CFFI:
+            self.session = requests.Session(impersonate="chrome120")
+        else:
+            self.session = requests.Session()
+            self.session.headers.update(self.DEFAULT_HEADERS)
         self.timeout = timeout
 
     @staticmethod
@@ -69,20 +77,24 @@ class HousePrice5168Crawler:
 
     def fetch_all_houses(self, account: str, account_type: str = "agent") -> List[Dict[str, Any]]:
         url = self.BASE_SEARCH_URL.format(account=account, type=account_type)
-        headers = {"Referer": f"https://realtor.houseprice.tw/{account_type}/buy/{account}/"}
+        headers = {
+            "Referer": f"https://realtor.houseprice.tw/{account_type}/buy/{account}/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+        }
 
         all_raw_cases: List[Dict[str, Any]] = []
         page = 1
         total_pages = 1
         total_items = 0
 
-        print(f"[*] [5168 API] 開始抓取 {account_type} ({account}) 物件清單...")
+        print(f"[*] [5168 API] 開始抓取 {account_type} ({account}) 物件清單 (curl_cffi={USE_CURL_CFFI})...")
 
         while page <= total_pages:
             try:
                 resp = self.session.get(url, headers=headers, params={"p": page}, timeout=self.timeout)
                 if resp.status_code != 200:
-                    print(f"[!] 5168 第 {page} 頁請求失敗 (HTTP {resp.status_code})")
+                    print(f"[!] 5168 第 {page} 頁請求失敗 (HTTP {resp.status_code}): {resp.text[:150]}")
                     break
 
                 data = resp.json()
@@ -129,8 +141,12 @@ class HousePrice5168Crawler:
             [account, account_type, agent_name, shop_title, len(raw_cases), now_str]
         )
 
-        # 1.5 清理既有店鋪快照，避免已下架物件殘留
-        self.db.execute("DELETE FROM t5168_houses WHERE account = ?;", [account])
+        # 1.5 僅在有成功獲取到案件時清理既有快照，避免抓取網路中斷時誤刪備份
+        if raw_cases:
+            self.db.execute("DELETE FROM t5168_houses WHERE account = ?;", [account])
+        else:
+            print(f"[Warn] 5168 本次未抓取到物件，保留現有 Turso 快照不作刪除。")
+            return
 
         # 2. 批次更新物件快照
         upsert_sql = """
@@ -258,10 +274,39 @@ class HousePrice5168Crawler:
         full_shop_url = f"https://realtor.houseprice.tw/{account_type}/buy/{account}/"
         print(f"\n================ 開始抓取 5168 店鋪 {account} ({account_type}) ================")
         raw_cases = self.fetch_all_houses(account, account_type)
-        print(f"共抓取 {len(raw_cases)} 筆 5168 在售庫存，正在儲存至 Turso...")
-        self.save_to_turso(account, account_type, raw_cases)
-        print(f"✅ 5168 店鋪 {account} 快照儲存完成！")
-        std_houses = self.to_standard_houses(raw_cases)
+        if raw_cases:
+            print(f"共抓取 {len(raw_cases)} 筆 5168 在售庫存，正在儲存至 Turso...")
+            self.save_to_turso(account, account_type, raw_cases)
+            print(f"✅ 5168 店鋪 {account} 快照儲存完成！")
+            std_houses = self.to_standard_houses(raw_cases)
+        else:
+            print(f"[Warn] 5168 線上抓取筆數為 0，嘗試從 Turso 資料庫載入既有快照...")
+            db_rows = self.db.execute("SELECT * FROM t5168_houses WHERE account = ?;", [account])
+            if db_rows:
+                print(f"[+] 成功從 Turso 資料庫快照載入 {len(db_rows)} 筆既有物件！")
+                std_houses = []
+                for r in db_rows:
+                    std_houses.append({
+                        "platform": "5168",
+                        "house_id": str(r.get("house_id")),
+                        "title": r.get("title") or "",
+                        "url": r.get("url") or f"https://buy.houseprice.tw/house/{r.get('house_id')}/",
+                        "county": (r.get("county") or "").strip(),
+                        "district": (r.get("district") or "").strip(),
+                        "street": (r.get("street") or "").strip(),
+                        "community_name": (r.get("community_name") or "").strip(),
+                        "price": float(r.get("price") or 0.0),
+                        "reg_area": float(r.get("reg_area") or 0.0),
+                        "main_area": float(r.get("main_area") or 0.0) if r.get("main_area") is not None else None,
+                        "floor": int(r.get("floor") or 0),
+                        "all_floor": int(r.get("all_floor") or 0),
+                        "house_age": float(r.get("house_age") or 0.0),
+                        "room": int(r.get("room") or 0),
+                        "case_type": r.get("case_type") or "",
+                        "cover": r.get("cover") or ""
+                    })
+            else:
+                std_houses = []
         return account, full_shop_url, std_houses
 
 if __name__ == "__main__":

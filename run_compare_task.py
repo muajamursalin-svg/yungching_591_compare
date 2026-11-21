@@ -19,7 +19,7 @@ def detect_platform(input_str: str) -> str:
     s = input_str.lower()
     if "houseprice.tw" in s or "5168" in s:
         return "5168"
-    if "rakuya.com.tw" in s:
+    if "rakuya.com.tw" in s or "rakuya" in s:
         return "rakuya"
     return "591"
 
@@ -202,12 +202,22 @@ def main():
         os.environ.get("USER_ID", "")
     )
     liff_base = os.environ.get("LIFF_URL", "")
-    shop_url = payload.get("shop_url") or os.environ.get("SHOP_URL") or shop_input
-    if shop_url == "true":
-        shop_url = shop_input
+    platform = (
+        payload.get("platform") or 
+        inputs.get("platform") or 
+        detect_platform(shop_input)
+    )
 
-    platform = detect_platform(shop_input)
-    print(f"[*] 偵測到目標平台: {platform} (輸入: {shop_input})")
+    shop_url = payload.get("shop_url") or os.environ.get("SHOP_URL") or shop_input
+    if shop_url == "true" or not shop_url.startswith("http"):
+        if platform == "5168":
+            shop_url = f"https://realtor.houseprice.tw/agent/buy/{shop_input}/"
+        elif platform == "rakuya":
+            shop_url = f"https://vip.rakuya.com.tw/{shop_input}/sell"
+        elif platform == "591":
+            shop_url = f"https://www.591.com.tw/broker{shop_input}"
+
+    print(f"[*] 偵測到目標平台: {platform} (輸入: {shop_input}, 店鋪網址: {shop_url})")
 
     db = TursoClient()
     comparator = InventoryComparator(db)
@@ -269,6 +279,13 @@ def main():
         shop_id, full_shop_url, std_houses = crawler_591.crawl_and_get_standard_houses(shop_input)
 
     target_shop_url = shop_url or full_shop_url
+
+    if not std_houses:
+        err_msg = f"⚠️ 無法取得【{platform}】店鋪庫存資料（店鋪代號: {shop_id}）。\n\n可能原因：該店鋪目前無在售物件，或平台連線異常，請稍後再試。"
+        print(f"[Warn] {err_msg}")
+        send_line_push_notification(user_id, err_msg, db_client=db)
+        release_user_query_lock(db, user_id)
+        return
 
     # 4. 執行通用特徵比對
     report_id = comparator.run_comparison(

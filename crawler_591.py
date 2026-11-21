@@ -130,8 +130,12 @@ class T591ShopCrawler:
                 updated_at=excluded.updated_at;
         """
 
-        # 1.5 清理既有店鋪快照，避免已下架物件殘留
-        self.db.execute("DELETE FROM t591_houses WHERE shop_id = ?;", [shop_id])
+        # 1.5 僅在有成功獲取到物件時清理既有快照，避免抓取異常時誤刪
+        if houses:
+            self.db.execute("DELETE FROM t591_houses WHERE shop_id = ?;", [shop_id])
+        else:
+            print(f"[Warn] 591 本次未抓取到物件，保留現有 Turso 快照不作刪除。")
+            return
 
         for h in houses:
             hid = str(h.get("id"))

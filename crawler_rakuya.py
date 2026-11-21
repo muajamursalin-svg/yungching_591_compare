@@ -281,8 +281,12 @@ class RakuyaShopCrawler:
             [shop_id, meta.get("agent_name"), meta.get("shop_title"), meta.get("company_name"), len(houses), now_str]
         )
 
-        # 1.5 清理既有店鋪快照，徹底避免已下架物件殘留
-        self.db.execute("DELETE FROM trakuya_houses WHERE shop_id = ?;", [shop_id])
+        # 1.5 僅在有成功獲取到物件時清理既有快照，徹底避免異常時誤刪
+        if houses:
+            self.db.execute("DELETE FROM trakuya_houses WHERE shop_id = ?;", [shop_id])
+        else:
+            print(f"[Warn] 樂屋網 本次未抓取到物件，保留現有 Turso 快照不作刪除。")
+            return
 
         # 2. 批量儲存物件快照
         upsert_sql = """
