@@ -353,7 +353,7 @@
           { key: 'abnormal', name: '全部異常', count: abnormalCount.value },
           { key: 'NOT_FOUND', name: '疑似已下架', count: report.value?.not_found_count || 0 },
           { key: 'PRICE_MISMATCH', name: '價格不一致', count: report.value?.price_diff_count || 0 },
-          { key: 'SPEC_MISMATCH', name: '規格/屋齡出入', count: report.value?.spec_diff_count || 0 },
+          { key: 'SPEC_MISMATCH', name: '規格不符', count: report.value?.spec_diff_count || 0 },
           { key: 'NORMAL', name: '正常在售', count: report.value?.matched_count || 0 },
           { key: 'all', name: '全部物件', count: items.value.length },
         ]);
@@ -386,7 +386,7 @@
             case 'NORMAL': return '🟢 正常在售';
             case 'NOT_FOUND': return '🔴 疑似已下架';
             case 'PRICE_MISMATCH': return '🟡 價格不一致';
-            case 'SPEC_MISMATCH': return '🟠 規格出入';
+            case 'SPEC_MISMATCH': return '🟠 規格不符';
             default: return status;
           }
         }

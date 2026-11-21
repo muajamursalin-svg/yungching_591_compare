@@ -173,7 +173,7 @@ def format_compare_summary(platform: str, shop_id: str, total: int, matched: int
         abnormal_detail = (
             f"  • ❌ 查無分店庫存：{not_found} 件 (疑似已下架)\n"
             f"  • 💰 總價標價出入：{price_diff} 件 (開價不一致)\n"
-            f"  • 📐 規格/樓層出入：{spec_diff} 件 (屋齡/樓層出入)"
+            f"  • 📐 規格不符提示：{spec_diff} 件 (樓層/規格出入)"
         )
 
     return (

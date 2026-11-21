@@ -424,15 +424,16 @@ class InventoryComparator:
                 f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else f"{f2}樓"
                 anomalies.append(f"樓層規劃出入：{platform_name} 標「{f1_desc}」 vs 永慶標「{f2_desc}」 (疑似樓中樓 vs 單一樓層規劃出入)")
 
-        # 特殊判斷 0：樓層容錯模式 (其他主要條件皆吻合，僅樓層不同，如經紀人避諱4樓或行銷宣傳調整樓層)
+        # 特殊判斷 0：樓層容錯模式 (其他主要條件皆吻合，僅樓層不同，如經紀人避諱4樓改標或戶別出入)
         if is_floor_override:
             status = "SPEC_MISMATCH"
             f1_desc = f"{f1}~{to_f1}樓" if to_f1 > f1 else (f"{f1}樓" if f1 != 99 else "整棟")
             f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else (f"{f2}樓" if f2 != 99 else "整棟")
             reason = (
-                f"💡 提示：樓層標示出入 (疑似人員避諱改標或樓層填寫出入)\n"
-                f"• {platform_name} 標示樓層：{f1_desc} vs 永慶標示樓層：{f2_desc}\n"
-                f"• 社區名稱、總價 ({p1}萬)、建坪 ({a1}坪)、總樓高 ({allf1 or allf2}樓)、路名等其他主要條件均吻合"
+                f"⚠️ 規格不符提示：樓層標示出入 (無法完全判定為同一物件)\n"
+                f"• {platform_name} 標示樓層：{f1_desc} vs 永慶分店標示：{f2_desc}\n"
+                f"• 因樓層出入（疑似避諱4樓改標或不同戶別），無法直接判定為同一物件，故歸納為【規格不符】提示供人員查核確認\n"
+                f"• 其他條件吻合：社區名稱、總價 ({p1}萬)、建坪 ({a1}坪)、總樓高 ({allf1 or allf2}樓)、路名等條件均高度相符"
             )
             return make_return(status, reason)
 
