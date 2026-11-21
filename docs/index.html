@@ -59,52 +59,56 @@
 
     <!-- 報告主體內容 -->
     <main v-else-if="report" class="p-4 space-y-4">
-      <!-- 統計數據卡片 -->
+      <!-- 統計數據卡片 (4個圖卡分兩行排列) -->
       <div class="grid grid-cols-2 gap-3">
-        <!-- 總在售 -->
+        <!-- 第 1 行左：平台總在售 -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
           <div class="text-xs text-slate-500 font-medium">{{ platformLabel }} 總在售</div>
           <div class="text-2xl font-bold text-slate-800 mt-1">{{ report.total_591_count }} <span class="text-xs font-normal text-slate-400">件</span></div>
         </div>
 
-        <!-- 異常總數 -->
-        <div class="bg-red-50 p-3 rounded-xl border border-red-200 shadow-sm">
-          <div class="text-xs text-red-600 font-medium">異常需處理</div>
-          <div class="text-2xl font-bold text-red-600 mt-1">{{ abnormalCount }} <span class="text-xs font-normal text-red-400">件</span></div>
-        </div>
-
-        <!-- 查無外網資料 -->
+        <!-- 第 1 行右：查無外網資料 -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 flex items-center gap-1">
+          <div class="text-xs text-slate-500 flex items-center gap-1 font-medium">
             <span class="w-2 h-2 rounded-full bg-red-500"></span> 查無外網資料
           </div>
-          <div class="text-xl font-bold text-slate-800 mt-1">{{ counts.NOT_FOUND }} <span class="text-xs font-normal text-slate-400">件</span></div>
+          <div class="text-2xl font-bold text-red-600 mt-1">{{ counts.NOT_FOUND }} <span class="text-xs font-normal text-slate-400">件</span></div>
         </div>
 
-        <!-- 內部網頁已上架 -->
+        <!-- 第 2 行左：規格不符 -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 內部網頁已上架
+          <div class="text-xs text-slate-500 flex items-center gap-1 font-medium">
+            <span class="w-2 h-2 rounded-full bg-orange-500"></span> 規格不符
           </div>
-          <div class="text-xl font-bold text-emerald-700 mt-1">{{ counts.INTERNAL_ACTIVE }} <span class="text-xs font-normal text-slate-400">件</span></div>
+          <div class="text-2xl font-bold text-orange-600 mt-1">{{ counts.SPEC_MISMATCH }} <span class="text-xs font-normal text-slate-400">件</span></div>
+        </div>
+
+        <!-- 第 2 行右：價格不一致 -->
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div class="text-xs text-slate-500 flex items-center gap-1 font-medium">
+            <span class="w-2 h-2 rounded-full bg-amber-500"></span> 價格不一致
+          </div>
+          <div class="text-2xl font-bold text-amber-600 mt-1">{{ counts.PRICE_MISMATCH }} <span class="text-xs font-normal text-slate-400">件</span></div>
         </div>
       </div>
 
-      <!-- 分頁標籤篩選 (全部展開無卷軸，清楚點選) -->
-      <div class="flex flex-wrap items-center gap-2 pb-1 text-xs">
-        <button 
-          v-for="tab in tabs" 
-          :key="tab.key"
-          @click="currentTab = tab.key"
-          :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold ring-2 ring-emerald-600 ring-offset-1 shadow' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm'"
-          class="px-2.5 py-1.5 rounded-lg transition-all flex items-center justify-center">
-          <span>{{ tab.name }}</span>
-          <span 
-            :class="currentTab === tab.key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'" 
-            class="ml-1.5 px-1.5 py-0.5 rounded-full text-[11px] font-bold">
-            {{ tab.count }}
-          </span>
-        </button>
+      <!-- 分頁標籤篩選 (依序三行排列) -->
+      <div class="space-y-2 text-xs">
+        <div v-for="(row, rIdx) in tabRows" :key="rIdx" class="flex items-center gap-2">
+          <button 
+            v-for="tab in row" 
+            :key="tab.key"
+            @click="currentTab = tab.key"
+            :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold ring-2 ring-emerald-600 ring-offset-1 shadow' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm'"
+            class="flex-1 px-2.5 py-2 rounded-lg transition-all flex items-center justify-center min-w-0">
+            <span class="truncate">{{ tab.name }}</span>
+            <span 
+              :class="currentTab === tab.key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'" 
+              class="ml-1.5 px-1.5 py-0.5 rounded-full text-[11px] font-bold shrink-0">
+              {{ tab.count }}
+            </span>
+          </button>
+        </div>
       </div>
 
       <!-- 搜尋框 -->
@@ -446,6 +450,22 @@
           return liveYcSyncTime.value || '2026-11-20 22:05:27';
         });
 
+        const tabRows = computed(() => [
+          [
+            { key: 'abnormal', name: '全部異常', count: abnormalCount.value },
+            { key: 'NOT_FOUND', name: '查無外網資料', count: counts.value.NOT_FOUND },
+            { key: 'INTERNAL_ACTIVE', name: '內部網頁已上架', count: counts.value.INTERNAL_ACTIVE },
+          ],
+          [
+            { key: 'PRICE_MISMATCH', name: '價格不一致', count: counts.value.PRICE_MISMATCH },
+            { key: 'SPEC_MISMATCH', name: '規格不符', count: counts.value.SPEC_MISMATCH },
+          ],
+          [
+            { key: 'NORMAL', name: '正常在售', count: counts.value.NORMAL },
+            { key: 'all', name: '全部物件', count: items.value.length },
+          ]
+        ]);
+
         const tabs = computed(() => [
           { key: 'abnormal', name: '全部異常', count: abnormalCount.value },
           { key: 'NOT_FOUND', name: '查無外網資料', count: counts.value.NOT_FOUND },
@@ -732,6 +752,7 @@
           counts,
           currentTab,
           tabs,
+          tabRows,
           keyword,
           filteredItems,
           abnormalCount,
