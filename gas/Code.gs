@@ -263,22 +263,21 @@ function doPost(e) {
           // 檢查 1 分鐘快取
           const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
           if (cachedReport) {
-            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + 
-                             (parseInt(cachedReport.price_diff_count) || 0) + 
-                             (parseInt(cachedReport.spec_diff_count) || 0);
             const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
+            const summaryText = formatCompareSummaryText(
+              reqPlatform,
+              shopId,
+              newCnt,
+              cachedReport.total_591_count,
+              cachedReport.matched_count,
+              cachedReport.not_found_count,
+              cachedReport.price_diff_count,
+              cachedReport.spec_diff_count,
+              true
+            );
 
             replyLineMessage(lineToken, replyToken,
-              `⚡【${reqPlatform} 店鋪比對報告（快取紀錄）】\n` +
-              `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
-              `📍 ${reqPlatform} 店鋪代號: ${shopId}\n` +
-              `📈 累積查詢: 第 ${newCnt} 次\n` +
-              `📦 總在售: ${cachedReport.total_591_count} 件\n` +
-              `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
-              `⚠️ 異常物件: ${abnormal} 件\n` +
-              `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
-              `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
-              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件`,
+              summaryText,
               userShops,
               targetLiff
             );
@@ -414,22 +413,21 @@ function doPost(e) {
           // 檢查 1 分鐘內快取
           const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
           if (cachedReport) {
-            const abnormal = (parseInt(cachedReport.not_found_count) || 0) + 
-                             (parseInt(cachedReport.price_diff_count) || 0) + 
-                             (parseInt(cachedReport.spec_diff_count) || 0);
             const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
+            const summaryText = formatCompareSummaryText(
+              platform,
+              shopId,
+              currentCount,
+              cachedReport.total_591_count,
+              cachedReport.matched_count,
+              cachedReport.not_found_count,
+              cachedReport.price_diff_count,
+              cachedReport.spec_diff_count,
+              true
+            );
 
             replyLineMessage(lineToken, replyToken,
-              `⚡【${platform} 店鋪比對報告（快取紀錄）】\n` +
-              `（系統偵測 1 分鐘內已有比對記錄，直接回傳最新結果）\n\n` +
-              `📍 ${platform} 店鋪代號: ${shopId}\n` +
-              `📈 累積查詢: 第 ${currentCount} 次\n` +
-              `📦 總在售: ${cachedReport.total_591_count} 件\n` +
-              `🟢 正常在售: ${cachedReport.matched_count} 件\n` +
-              `⚠️ 異常物件: ${abnormal} 件\n` +
-              `  • 查無分店庫存 (疑似下架): ${cachedReport.not_found_count} 件\n` +
-              `  • 總價標價不一致: ${cachedReport.price_diff_count} 件\n` +
-              `  • 規格/樓層/屋齡出入: ${cachedReport.spec_diff_count || 0} 件`,
+              summaryText,
               userShops,
               targetLiff
             );
@@ -989,34 +987,75 @@ function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
     return { type: "text", text: text };
   }
 
+  // 決定 Header 橫幅顏色與標題
+  let headerColor = null;
+  let headerTitle = null;
+
+  if (text.indexOf("比對完成") !== -1 || text.indexOf("比對報告") !== -1 || text.indexOf("比對結果總覽") !== -1) {
+    if (text.indexOf("快取") !== -1) {
+      headerColor = "#00b900";
+      headerTitle = "⚡ 庫存比對完成（快取紀錄 ✔）";
+    } else {
+      headerColor = "#06C755";
+      headerTitle = "✅ 庫存比對完成 ✔";
+    }
+  } else if (text.indexOf("⚠️") !== -1 || text.indexOf("異常") !== -1 || text.indexOf("失敗") !== -1) {
+    headerColor = "#e53e3e";
+    headerTitle = "⚠️ 系統提示";
+  } else if (text.indexOf("處理中") !== -1 || text.indexOf("稍後") !== -1 || text.indexOf("啟動") !== -1) {
+    headerColor = "#0084ff";
+    headerTitle = "⏳ 比對任務處理中";
+  }
+
   // 摘要標題用於推播與無障礙視窗
-  const altText = (text.split("\n")[0] || "比對助理回覆").substring(0, 38);
+  const altText = headerTitle || (text.split("\n")[0] || "比對助理回覆").substring(0, 38);
+
+  const bubbleContents = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "text",
+          text: text,
+          size: "sm",
+          wrap: true,
+          lineSpacing: "5px"
+        }
+      ]
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: buttons
+    }
+  };
+
+  if (headerColor && headerTitle) {
+    bubbleContents.header = {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: headerColor,
+      paddingTop: "14px",
+      paddingBottom: "14px",
+      contents: [
+        {
+          type: "text",
+          text: headerTitle,
+          weight: "bold",
+          size: "md",
+          color: "#ffffff"
+        }
+      ]
+    };
+  }
 
   const flexMsg = {
     type: "flex",
     altText: altText,
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          {
-            type: "text",
-            text: text,
-            size: "sm",
-            wrap: true,
-            lineSpacing: "4px"
-          }
-        ]
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        spacing: "sm",
-        contents: buttons
-      }
-    }
+    contents: bubbleContents
   };
 
   if (quickItems.length > 0) {
@@ -1024,6 +1063,46 @@ function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
   }
 
   return flexMsg;
+}
+
+/**
+ * 產生包含打勾符號與結構化排版的比對摘要文字
+ */
+function formatCompareSummaryText(platform, shopId, currentCount, total, matched, notFound, priceDiff, specDiff, isCache) {
+  const platDisplay = platform === "5168" ? "5168 房仲店鋪" : (platform === "rakuya" ? "樂屋網 VIP 店鋪" : "591 店鋪");
+  const abnormal = (parseInt(notFound) || 0) + (parseInt(priceDiff) || 0) + (parseInt(specDiff) || 0);
+  const cacheNote = isCache ? "（距前次比對未滿 1 分鐘，回傳最新快取紀錄）\n\n" : "";
+
+  let abnormalDetail = "";
+  let statusNote = "";
+  if (abnormal === 0) {
+    abnormalDetail = "  🎉 太棒了！全部物件皆與分店一致，未發現任何異常 ✔";
+    statusNote = "🎉 全數正常 ✔";
+  } else {
+    statusNote = `⚠️ 發現 ${abnormal} 件異常`;
+    abnormalDetail = 
+      `  • ❌ 查無分店庫存：${notFound} 件 (疑似已下架)\n` +
+      `  • 💰 總價標價出入：${priceDiff} 件 (開價不一致)\n` +
+      `  • 📐 規格/樓層出入：${specDiff || 0} 件 (屋齡/樓層出入)`;
+  }
+
+  const countStr = currentCount ? `📈 累積查詢：第 ${currentCount} 次\n` : "";
+
+  return (
+    `${cacheNote}` +
+    `🏢 比對平台：${platDisplay}\n` +
+    `📍 店鋪代號：${shopId}\n` +
+    countStr +
+    `📦 在庫總數：${total} 件\n\n` +
+    `【📊 庫存比對結果總覽】\n` +
+    `✔ 🟢 正常在售：${matched} 件 (與分店庫存相符)\n` +
+    `❗ ⚠️ 異常物件：${abnormal} 件 (${statusNote})\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `【🔍 異常類別明細】\n` +
+    `${abnormalDetail}\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `💡 點擊下方【📊 開啟 LIFF 儀表板】可查看完整物件診斷與下架標註！`
+  );
 }
 
 /**
