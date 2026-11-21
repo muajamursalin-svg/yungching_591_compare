@@ -180,12 +180,25 @@ class InventoryComparator:
                 if abs(allf1 - up_f2) > 1:
                     continue
 
-            # 屋齡比對：若社區吻合或路名吻合，不在此階段硬性排除 (避免人員打錯如 108、113 年被誤判下架，留待第二階段提示)
-            # 僅在無社區吻合且無路名吻合時，雙方皆有屋齡時限制誤差 <= 3.0 年
+            # 屋齡比對與無社區路名交叉防護：
             age2 = float(y.get("build_age") or 0.0)
             st1_norm = st1.replace('臺', '台')
             st_match = bool(st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2.replace('臺', '台')))
-            if not comm_match and not st_match and age1 > 0 and age2 > 0:
+
+            # 既無社區吻合、又無路名吻合時的嚴格交叉門檻：
+            if not comm_match and not st_match:
+                # 1. 總價差異不可過大 (差價 > 350 萬或相對誤差 > 15%，絕非同一物件)
+                p2 = float(y.get("price") or 0.0)
+                if p1 > 0 and p2 > 0:
+                    diff_p = abs(p1 - p2)
+                    if diff_p > 350.0 or (diff_p / max(p1, p2)) > 0.15:
+                        continue
+
+                # 2. 屋齡誤差不可超過 1.5 年 (無社區路名時不容許大幅屋齡誤差)
+                if age1 > 0 and age2 > 0:
+                    if abs(age1 - age2) > 1.5:
+                        continue
+            elif not comm_match and not st_match and age1 > 0 and age2 > 0:
                 if abs(age1 - age2) > 3.0:
                     continue
 
@@ -321,6 +334,13 @@ class InventoryComparator:
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、屋齡 ({age1}年)、總樓高皆相符"
             )
             return best_y, status, reason, confidence
+
+        # 多重異常排除 (黃金準則：若出現 3 個或以上錯誤，或無社區吻合且路名出入+顯著價差，判定為不同物件 NOT_FOUND)
+        if len(anomalies) >= 3:
+            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (多項關鍵特徵出入過大，判定非同一物件)", 0.0
+
+        if not comm_match and has_street_diff and has_price_diff and (abs(diff_price) >= 200.0 or abs(diff_price) / max(p1, p2) >= 0.08):
+            return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登 (路名不同且價差過大，判定非同一物件)", 0.0
 
         if has_price_diff:
             status = "PRICE_MISMATCH"
