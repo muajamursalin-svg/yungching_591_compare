@@ -212,13 +212,18 @@ class InventoryComparator:
                     continue
 
                 # 總樓高比對：
-                # 若社區吻合則不在此階段硬排除 (留至第二階段提示，避免因地下室或頂樓計算出入被誤判下架)
-                # 若無社區吻合，總樓高容許誤差 <= 1 樓
-                if not comm_match and allf1 > 0 and up_f2 > 0:
+                # 1. 若社區吻合，留至第二階段提示 (避免因地下室或頂樓計算出入被誤判下架)
+                # 2. 若路名吻合、總價極度接近 (<= 10萬) 且坪數吻合 (<= 1.5坪)，留至第二階段提示 (避免透天豪墅因權狀層數 vs 現況層數計算出入被誤判下架)
+                # 3. 其他情況，總樓高容許誤差 <= 1 樓
+                p2 = float(y.get("price") or 0.0)
+                diff_p = abs(p1 - p2) if (p1 > 0 and p2 > 0) else 999.0
+                is_exact_match = st_match and diff_p <= 10.0 and diff_area <= 1.5
+
+                if not comm_match and not is_exact_match and allf1 > 0 and up_f2 > 0:
                     if abs(allf1 - up_f2) > 1:
                         continue
-                elif floor_tolerance and allf1 > 0 and up_f2 > 0:
-                    # 樓層容錯模式下，總樓高誤差必須 <= 1 樓
+                elif floor_tolerance and not is_exact_match and allf1 > 0 and up_f2 > 0:
+                    # 樓層容錯模式下，若非確切同路同價物件，總樓高誤差必須 <= 1 樓
                     if abs(allf1 - up_f2) > 1:
                         continue
 
@@ -451,10 +456,10 @@ class InventoryComparator:
         # 特殊判斷 2：僅總樓高有出入，其他條件 (總價/建坪/樓層/屋齡/路名) 皆吻合
         if not has_price_diff and not has_age_diff and not has_street_diff and not has_floor_range_diff and has_allf_diff:
             status = "SPEC_MISMATCH"
-            f_disp = f"{f1}樓" if f1 != 99 else "整棟"
+            f_disp = f"{f1}樓" if f1 not in [0, 99] else "整棟"
             reason = (
-                f"💡 提示：總樓高出入 (疑似含地下室或頂樓計算差異)\n"
-                f"• {platform_name} 標 {allf1} 樓高 vs 永慶標 {allf2} 樓高\n"
+                f"⚠️ 規格不符提示：總樓高出入 (疑似含地下室或頂樓增建計算差異)\n"
+                f"• {platform_name} 標 {allf1} 樓高 vs 永慶分店標 {allf2} 樓高\n"
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、樓層 ({f_disp})、屋齡 ({age1}年)、路名皆完全相符"
             )
             return make_return(status, reason)
