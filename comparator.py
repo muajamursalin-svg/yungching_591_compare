@@ -129,89 +129,137 @@ class InventoryComparator:
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
-        # 1. 第一階段：硬性特徵比對
-        candidates = []
-        for y in yc_list:
-            c2 = (y.get("county") or "").strip()
-            d2 = (y.get("district") or "").strip()
-            if c1 != c2 or d1 != d2:
-                continue
-
-            f2 = int(y.get("from_floor") or 0)
-            to_f2 = int(y.get("to_floor") or 0)
-            up_f2 = int(y.get("up_floor") or 0)
-            to_f1 = int(h.get("to_floor") or f1 or 0)
-
-            # 樓層比對 (大樓公寓相容單一樓層與樓中樓區間；透天整棟相容 99、1、-1 地下車庫別墅、0 或 to_floor == up_floor)
-            if f1 > 0 and f1 != 99:
-                effective_to_f2 = to_f2 if to_f2 > 0 else f2
-                floor_match = (
-                    f1 == f2 or 
-                    to_f1 == effective_to_f2 or 
-                    (max(f1, f2) <= min(to_f1, effective_to_f2)) or 
-                    (f1 in range(min(f2, effective_to_f2), max(f2, effective_to_f2) + 1)) or 
-                    (f2 in range(min(f1, to_f1), max(f1, to_f1) + 1))
-                )
-                if not floor_match:
-                    continue
-            elif f1 == 99:
-                if f2 not in [-1, 0, 1, 99] and to_f2 != up_f2:
+        # 1. 第一階段：硬性特徵比對 (支援 Pass 1: 嚴格樓層比對 與 Pass 2: 樓層容錯比對)
+        def collect_candidates(floor_tolerance: bool = False):
+            cand_list = []
+            for y in yc_list:
+                c1_norm = c1.replace('臺', '台')
+                c2_norm = (y.get("county") or "").strip().replace('臺', '台')
+                if c1_norm != c2_norm:
                     continue
 
-            # 建物登記坪數 (容許誤差 <= 1.5 坪)
-            a2 = float(y.get("reg_area") or 0.0)
-            diff_area = abs(a1 - a2)
-            if diff_area > 1.5:
-                continue
+                d2 = (y.get("district") or "").strip()
 
-            # 社區名稱吻合度檢查
-            comm2 = clean_text(y.get("community_name") or "")
-            case2 = clean_text(y.get("case_name") or "")
-            addr2 = (y.get("address") or "").strip()
-            comm_match = False
-            if comm1 and comm2 and (comm1 in comm2 or comm2 in comm1):
-                comm_match = True
-            elif comm2 and comm2 in t1:
-                comm_match = True
+                # 社區名稱吻合度檢查
+                comm2 = clean_text(y.get("community_name") or "")
+                case2 = clean_text(y.get("case_name") or "")
+                addr2 = (y.get("address") or "").strip()
+                comm_match = False
+                if comm1 and comm2 and (comm1 in comm2 or comm2 in comm1):
+                    comm_match = True
+                elif comm2 and comm2 in t1:
+                    comm_match = True
 
-            # 總樓高比對：若社區吻合則不在此階段硬排除 (留至第二階段提示，避免因地下室或頂樓計算出入被誤判下架)
-            # 若無社區吻合，總樓高容許誤差 <= 1 樓
-            if not comm_match and allf1 > 0 and up_f2 > 0:
-                if abs(allf1 - up_f2) > 1:
-                    continue
+                # 路名吻合度檢查 (統一 臺/台)
+                st1_norm = st1.replace('臺', '台')
+                addr2_norm = addr2.replace('臺', '台')
+                case2_norm = case2.replace('臺', '台')
+                st_match = bool(st1 and (st1_norm in addr2_norm or st1_norm in case2_norm))
 
-            # 屋齡比對與無社區路名交叉防護：
-            age2 = float(y.get("build_age") or 0.0)
-            st1_norm = st1.replace('臺', '台')
-            st_match = bool(st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2.replace('臺', '台')))
-
-            # 既無社區吻合、又無路名吻合時的嚴格交叉門檻：
-            if not comm_match and not st_match:
-                # 1. 總價差異不可過大 (差價 > 350 萬或相對誤差 > 15%，絕非同一物件)
-                p2 = float(y.get("price") or 0.0)
-                if p1 > 0 and p2 > 0:
-                    diff_p = abs(p1 - p2)
-                    if diff_p > 350.0 or (diff_p / max(p1, p2)) > 0.15:
+                # 行政區檢查 (同縣市跨區放寬)：
+                # 若同縣市但行政區不同，若社區完全吻合 或 (路名吻合且兩路段未相距過遠)，放寬行政區判定 (如台中市中平路跨北屯/西屯交界)
+                if d1 != d2:
+                    if not comm_match and not st_match:
+                        continue
+                    if not comm_match and is_road_too_far(d1, st1, addr2, max_meters=1500.0):
                         continue
 
-                # 2. 屋齡誤差不可超過 1.5 年 (無社區路名時不容許大幅屋齡誤差)
-                if age1 > 0 and age2 > 0:
-                    if abs(age1 - age2) > 1.5:
+                f2 = int(y.get("from_floor") or 0)
+                to_f2 = int(y.get("to_floor") or 0)
+                up_f2 = int(y.get("up_floor") or 0)
+                to_f1 = int(h.get("to_floor") or f1 or 0)
+
+                # 樓層比對
+                if not floor_tolerance:
+                    # 嚴格比對 (大樓公寓相容單一樓層與樓中樓區間；透天整棟相容 99、1、-1、0 或 to_floor == up_floor)
+                    if f1 > 0 and f1 != 99:
+                        effective_to_f2 = to_f2 if to_f2 > 0 else f2
+                        floor_match = (
+                            f1 == f2 or 
+                            to_f1 == effective_to_f2 or 
+                            (max(f1, f2) <= min(to_f1, effective_to_f2)) or 
+                            (f1 in range(min(f2, effective_to_f2), max(f2, effective_to_f2) + 1)) or 
+                            (f2 in range(min(f1, to_f1), max(f1, to_f1) + 1))
+                        )
+                        if not floor_match:
+                            continue
+                    elif f1 == 99:
+                        if f2 not in [-1, 0, 1, 99] and to_f2 != up_f2:
+                            continue
+                else:
+                    # 樓層容錯比對 (Pass 2)：排除已經相符者
+                    effective_to_f2 = to_f2 if to_f2 > 0 else f2
+                    is_same_floor = (
+                        (f1 == f2 and to_f1 == effective_to_f2) or
+                        (f1 == 99 and (f2 in [-1, 0, 1, 99] or to_f2 == up_f2))
+                    )
+                    if is_same_floor:
                         continue
-            elif not comm_match and not st_match and age1 > 0 and age2 > 0:
-                if abs(age1 - age2) > 3.0:
+                    # 必須社區或路名吻合
+                    if not comm_match and not st_match:
+                        continue
+                    # 總價差異必須極小 (<= 80萬 或 <= 5%)
+                    p2 = float(y.get("price") or 0.0)
+                    if p1 > 0 and p2 > 0:
+                        diff_p = abs(p1 - p2)
+                        if diff_p > 80.0 and (diff_p / max(p1, p2)) > 0.05:
+                            continue
+
+                # 建物登記坪數 (容許誤差 <= 1.5 坪)
+                a2 = float(y.get("reg_area") or 0.0)
+                diff_area = abs(a1 - a2)
+                if diff_area > 1.5:
                     continue
 
-            # 道路經緯度距離定位檢核：若無社區吻合，且兩條路實際相距超過 800 公尺 -> 判定不同物件！
-            if not comm_match and is_road_too_far(d1, st1, addr2, max_meters=800.0):
-                continue
+                # 總樓高比對：
+                # 若社區吻合則不在此階段硬排除 (留至第二階段提示，避免因地下室或頂樓計算出入被誤判下架)
+                # 若無社區吻合，總樓高容許誤差 <= 1 樓
+                if not comm_match and allf1 > 0 and up_f2 > 0:
+                    if abs(allf1 - up_f2) > 1:
+                        continue
+                elif floor_tolerance and allf1 > 0 and up_f2 > 0:
+                    # 樓層容錯模式下，總樓高誤差必須 <= 1 樓
+                    if abs(allf1 - up_f2) > 1:
+                        continue
 
-            candidates.append((diff_area, y, comm_match))
+                # 屋齡比對與無社區路名交叉防護：
+                age2 = float(y.get("build_age") or 0.0)
+
+                # 既無社區吻合、又無路名吻合時的嚴格交叉門檻：
+                if not comm_match and not st_match:
+                    # 1. 總價差異不可過大 (差價 > 350 萬或相對誤差 > 15%，絕非同一物件)
+                    p2 = float(y.get("price") or 0.0)
+                    if p1 > 0 and p2 > 0:
+                        diff_p = abs(p1 - p2)
+                        if diff_p > 350.0 or (diff_p / max(p1, p2)) > 0.15:
+                            continue
+
+                    # 2. 屋齡誤差不可超過 1.5 年 (無社區路名時不容許大幅屋齡誤差)
+                    if age1 > 0 and age2 > 0:
+                        if abs(age1 - age2) > 1.5:
+                            continue
+                elif not comm_match and not st_match and age1 > 0 and age2 > 0:
+                    if abs(age1 - age2) > 3.0:
+                        continue
+
+                # 道路經緯度距離定位檢核：若無社區吻合，且兩條路實際相距超過 800 公尺 -> 判定不同物件！
+                if not comm_match and is_road_too_far(d1, st1, addr2, max_meters=800.0):
+                    continue
+
+                cand_list.append((diff_area, y, comm_match))
+            return cand_list
+
+        candidates = collect_candidates(floor_tolerance=False)
+        is_floor_override = False
+        if not candidates:
+            candidates = collect_candidates(floor_tolerance=True)
+            if candidates:
+                is_floor_override = True
 
         if not candidates:
             return None, "NOT_FOUND", "🔴 分店目前無此庫存物件\n• 疑似已成交下架，或未在 11 家加盟店刊登", 0.0
 
-        # 若有多筆符合硬性條件，以 社區/路名吻合度 與 坪數誤差 排序
+        # 若有多筆符合硬性條件，以 特徵吻合度、總價接近度 與 坪數誤差 綜合評分排序
         def score_cand(item):
             diff_a, y, c_match = item
             score = 50.0  # 通過硬性篩選的基本分
@@ -232,12 +280,32 @@ class InventoryComparator:
             if f1 == f2 and to_f1 == effective_to_f2:
                 score += 15.0
 
+            # 總價接近度評分加權 (零價差或極小價差優先比對)
+            p2 = float(y.get("price") or 0.0)
+            diff_p = abs(p1 - p2)
+            if diff_p < 0.1:
+                score += 40.0
+            elif diff_p <= 20.0:
+                score += 25.0
+            elif diff_p <= 50.0:
+                score += 15.0
+            elif diff_p <= 100.0:
+                score += 5.0
+
             score += max(0.0, 10.0 - diff_a * 5)
             return score
 
-        candidates.sort(key=score_cand, reverse=True)
-        best_diff_a, best_y, _ = candidates[0]
-        confidence = min(100.0, score_cand((best_diff_a, best_y, _)))
+        # 排序：基本總分最高 > 價差最小 > 價格較低者 (用戶需求：如果條件完全一樣 價格取其低做比較)
+        candidates.sort(
+            key=lambda item: (
+                score_cand(item),
+                -abs(p1 - float(item[1].get("price") or 0.0)),
+                -float(item[1].get("price") or 0.0)
+            ),
+            reverse=True
+        )
+        best_diff_a, best_y, comm_match = candidates[0]
+        confidence = min(100.0, score_cand((best_diff_a, best_y, comm_match)))
 
         # 2. 第二階段：細節差異診斷
         anomalies = []
@@ -288,6 +356,18 @@ class InventoryComparator:
                 f1_desc = f"{f1}~{to_f1}樓" if to_f1 > f1 else f"{f1}樓"
                 f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else f"{f2}樓"
                 anomalies.append(f"樓層規劃出入：{platform_name} 標「{f1_desc}」 vs 永慶標「{f2_desc}」 (疑似樓中樓 vs 單一樓層規劃出入)")
+
+        # 特殊判斷 0：樓層容錯模式 (其他主要條件皆吻合，僅樓層不同，如經紀人避諱4樓或行銷宣傳調整樓層)
+        if is_floor_override:
+            status = "SPEC_MISMATCH"
+            f1_desc = f"{f1}~{to_f1}樓" if to_f1 > f1 else (f"{f1}樓" if f1 != 99 else "整棟")
+            f2_desc = f"{f2}~{effective_to_f2}樓" if effective_to_f2 > f2 else (f"{f2}樓" if f2 != 99 else "整棟")
+            reason = (
+                f"💡 提示：樓層標示出入 (疑似人員避諱改標或樓層填寫出入)\n"
+                f"• {platform_name} 標示樓層：{f1_desc} vs 永慶標示樓層：{f2_desc}\n"
+                f"• 社區名稱、總價 ({p1}萬)、建坪 ({a1}坪)、總樓高 ({allf1 or allf2}樓)、路名等其他主要條件均吻合"
+            )
+            return best_y, status, reason, confidence
 
         # 特殊判斷 1：僅屋齡有出入，其他條件 (總價/建坪/樓層/總高/路名) 皆吻合
         if not has_price_diff and not has_allf_diff and not has_street_diff and not has_floor_range_diff and has_age_diff:
