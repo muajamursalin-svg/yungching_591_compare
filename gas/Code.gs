@@ -1075,7 +1075,7 @@ function formatCompareSummaryText(platform, shopId, currentCount, total, matched
   } else {
     statusNote = `⚠️ 發現 ${abnormal} 件異常`;
     abnormalDetail = 
-      `  • ❌ 查無分店庫存：${notFound} 件 (疑似已下架)\n` +
+      `  • ❌ 查無分店庫存：${notFound} 件 (查無外網資料)\n` +
       `  • 💰 總價標價出入：${priceDiff} 件 (開價不一致)\n` +
       `  • 📐 規格不符提示：${specDiff || 0} 件 (樓層/規格出入)`;
   }
