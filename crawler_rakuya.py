@@ -210,6 +210,11 @@ class RakuyaShopCrawler:
                 if floor in [0, 1]:
                     floor = 99
 
+            # 判斷是否為土地
+            is_land = any(k in (case_type + title) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            if is_land:
+                case_type = "土地"
+
             houses.append({
                 "platform": "rakuya",
                 "house_id": ehid,
@@ -223,6 +228,8 @@ class RakuyaShopCrawler:
                 "price": price,
                 "unit_price": unit_price,
                 "reg_area": reg_area,
+                "land_area": reg_area,
+                "is_land": is_land,
                 "main_area": None,
                 "floor": floor,
                 "to_floor": to_floor,

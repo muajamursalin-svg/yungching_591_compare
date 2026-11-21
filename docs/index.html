@@ -148,9 +148,11 @@
                 {{ item.t591_title }}
               </h2>
               <div class="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-2">
-                <span>{{ item.t591_area }} 坪</span>
+                <span v-if="isLandItem(item)">地坪: {{ item.t591_area }} 坪</span>
+                <span v-else>{{ item.t591_area }} 坪</span>
                 <span>•</span>
-                <span>樓層: {{ item.t591_floor }}</span>
+                <span v-if="isLandItem(item)" class="text-emerald-700 font-bold">【土地】</span>
+                <span v-else>樓層: {{ item.t591_floor }}</span>
                 <span v-if="item.t591_community">• {{ item.t591_community }}</span>
               </div>
               <!-- 縣市區域路名顯示 -->
@@ -221,7 +223,7 @@
       </div>
     </main>
 
-    <!-- 回報內部網頁已上架彈窗 Modal -->
+    <!-- 回報內部網頁已上架確認彈窗 Modal -->
     <div v-if="modalItem" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
         <div class="flex items-center justify-between border-b pb-3 border-slate-100">
@@ -235,38 +237,21 @@
           <div class="font-bold text-slate-800 line-clamp-2">{{ modalItem.t591_title }}</div>
           <div class="text-slate-600 flex gap-2">
             <span>開價: <strong class="text-red-600">{{ modalItem.t591_price }}萬</strong></span>
-            <span>建坪: <strong>{{ modalItem.t591_area }}坪</strong></span>
-            <span>樓層: <strong>{{ modalItem.t591_floor }}</strong></span>
+            <span>坪數: <strong>{{ modalItem.t591_area }}坪</strong></span>
+            <span v-if="!isLandItem(modalItem)">樓層: <strong>{{ modalItem.t591_floor }}</strong></span>
+            <span v-else class="text-emerald-700 font-bold">【土地】</span>
           </div>
           <div v-if="modalItem.t591_address" class="text-slate-500 font-mono">📍 {{ modalItem.t591_address }}</div>
         </div>
 
-        <div class="space-y-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">
-              店頭內網案號 <span class="text-slate-400 font-normal">(選填，如 7476024)</span>
-            </label>
-            <input 
-              v-model="reportForm.caseNo"
-              type="text" 
-              placeholder="例如 7476024"
-              class="w-full bg-white border border-slate-300 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">
-              備註說明 <span class="text-slate-400 font-normal">(選填)</span>
-            </label>
-            <input 
-              v-model="reportForm.notes"
-              type="text" 
-              placeholder="例如：內網已上架，等外網同步"
-              class="w-full bg-white border border-slate-300 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          </div>
+        <div class="bg-emerald-50 text-emerald-800 p-3.5 rounded-xl border border-emerald-200 text-center space-y-1">
+          <p class="text-sm font-bold flex items-center justify-center gap-1.5 text-emerald-900">
+            <span>🔍</span> 確認物件存在於I智慧內部？
+          </p>
+          <p class="text-[11px] text-emerald-700">
+            點選確認後，將立即切換為「內部網頁已上架」綠色標籤，並全員同步共享。
+          </p>
         </div>
-
-        <p class="text-[11px] text-emerald-800 leading-relaxed bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
-          💡 回報後，全員比對同一個物件都會自動標示為「內部網頁已上架」；未來外網正式同步上架時，系統將自動納入在庫並自動清理。
-        </p>
 
         <div class="flex gap-2 pt-1">
           <button 
@@ -278,8 +263,8 @@
             @click="submitReportActive" 
             :disabled="submitting"
             class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-md transition-all flex items-center justify-center gap-1">
-            <span v-if="submitting">儲存中...</span>
-            <span v-else>確認回報上架</span>
+            <span v-if="submitting">更新中...</span>
+            <span v-else>確認在I智慧內</span>
           </button>
         </div>
       </div>
@@ -302,7 +287,6 @@
         const liveYcSyncTime = ref('');
 
         const modalItem = ref(null);
-        const reportForm = ref({ caseNo: '', notes: '' });
 
         // 從 URL 取得 report_id 或 shop_id，以及可選的 API 來源
         const urlParams = new URLSearchParams(window.location.search);
@@ -510,7 +494,20 @@
           }
         }
 
-        // 生成跨平台物件唯一指紋
+        function isLandItem(item) {
+          if (!item) return false;
+          const t = (item.t591_title || '').toLowerCase();
+          const f = String(item.t591_floor || '');
+          const addr = (item.t591_address || '');
+          return (
+            t.includes('土地') || t.includes('農地') || t.includes('建地') || 
+            t.includes('甲建') || t.includes('乙建') || t.includes('丙建') || t.includes('丁建') ||
+            f === '土地' || f === '0/0' || f === '0' ||
+            /[\u4e00-\u9fa50-9一二三四五六七八九十]+段/.test(addr)
+          );
+        }
+
+        // 生成跨平台物件唯一指紋 (支援房屋與土地)
         function generateFingerprint(item) {
           let addr = (item.t591_address || '').replace(/臺/g, '台');
           let county = '';
@@ -530,6 +527,16 @@
             street = addr;
           }
 
+          const p = (parseFloat(item.t591_price) || 0).toFixed(1);
+          const a = (parseFloat(item.t591_area) || 0).toFixed(1);
+          const clean = s => (s || '').replace(/[\s\-_\\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]/g, '');
+
+          if (isLandItem(item)) {
+            const secMatch = street.match(/([\u4e00-\u9fa50-9一二三四五六七八九十]+段)/);
+            const sec = secMatch ? secMatch[1] : street;
+            return `${clean(county)}_${clean(district)}_${clean(sec)}_land_${p}M_${a}P`.toLowerCase();
+          }
+
           let fStr = String(item.t591_floor || '');
           let fCode = '99F';
           if (!fStr.includes('整棟')) {
@@ -539,17 +546,11 @@
             }
           }
 
-          const p = (parseFloat(item.t591_price) || 0).toFixed(1);
-          const a = (parseFloat(item.t591_area) || 0).toFixed(1);
-
-          const clean = s => (s || '').replace(/[\s\-_\\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]/g, '');
-
           return `${clean(county)}_${clean(district)}_${clean(street)}_${fCode}_${p}M_${a}P`.toLowerCase();
         }
 
         function openReportModal(item) {
           modalItem.value = item;
-          reportForm.value = { caseNo: '', notes: '' };
         }
 
         async function submitReportActive() {
@@ -557,9 +558,8 @@
           submitting.value = true;
           try {
             const item = modalItem.value;
+            const isLand = isLandItem(item);
             const fp = generateFingerprint(item);
-            const caseNo = (reportForm.value.caseNo || '').trim();
-            const notes = (reportForm.value.notes || '').trim();
             const nowStr = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }).replace(/\//g, '-');
 
             // 解析地址特徵
@@ -570,11 +570,15 @@
             const dMatch = addr.match(/^(.*?區|.*?鄉|.*?鎮|.*?市)/);
             if (dMatch) { district = dMatch[1]; street = addr.substring(district.length); } else { street = addr; }
 
-            let fStr = String(item.t591_floor || '');
             let fNum = 99;
-            if (!fStr.includes('整棟')) {
-              const fMatch = fStr.match(/(\d+)/);
-              if (fMatch) fNum = parseInt(fMatch[1]);
+            if (isLand) {
+              fNum = 0;
+            } else {
+              let fStr = String(item.t591_floor || '');
+              if (!fStr.includes('整棟')) {
+                const fMatch = fStr.match(/(\d+)/);
+                if (fMatch) fNum = parseInt(fMatch[1]);
+              }
             }
 
             // 1. 寫入或更新 internal_active_houses 表
@@ -586,23 +590,20 @@
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
               ON CONFLICT(property_fingerprint) DO UPDATE SET
                 status = 'ACTIVE',
-                internal_case_no = excluded.internal_case_no,
-                notes = excluded.notes,
                 updated_at = excluded.updated_at;
             `;
             await queryTurso(upsertSql, [
               fp, item.platform || '591', item.t591_id, item.t591_title,
               county, district, street, fNum, parseFloat(item.t591_price) || 0, parseFloat(item.t591_area) || 0,
-              '店頭同仁', caseNo, notes, nowStr, nowStr
+              '店頭同仁', 'I智慧確認', '確認物件存在於I智慧內部', nowStr, nowStr
             ]);
 
             // 2. 更新 compare_items 本身狀態
-            const caseDisp = caseNo ? `案號：${caseNo}` : '已查驗在庫';
-            const notesDisp = notes ? `\n• 備註說明：${notes}` : '';
-            const newReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 內網案號：${caseDisp}\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁查驗已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。${notesDisp}`;
+            const typeLabel = isLand ? '土地物件' : '在庫物件';
+            const newReason = `🟢 內部網頁已上架 (同仁手動回報・全員共享)\n• 查驗狀態：確認物件存在於I智慧內部 (${typeLabel})\n• 回報時間：${nowStr} (店頭同仁確認)\n• 說明：此物件在外網雖查無資料，但經同仁確認已在內部網站上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。`;
 
-            const updateItemSql = "UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = ? WHERE id = ?;";
-            await queryTurso(updateItemSql, [newReason, caseNo || null, item.id]);
+            const updateItemSql = "UPDATE compare_items SET status = 'INTERNAL_ACTIVE', diff_reason = ?, matched_case_sid = 'I智慧確認' WHERE id = ?;";
+            await queryTurso(updateItemSql, [newReason, item.id]);
 
             // 3. 更新 compare_reports 計數
             if (report.value && report.value.report_id) {
@@ -615,10 +616,9 @@
             // 4. 即時更新本機 Vue 響應式狀態 (無需重新整頁載入)
             item.status = 'INTERNAL_ACTIVE';
             item.diff_reason = newReason;
-            item.matched_case_sid = caseNo || null;
+            item.matched_case_sid = 'I智慧確認';
 
             modalItem.value = null;
-            reportForm.value = { caseNo: '', notes: '' };
           } catch (err) {
             alert('回報失敗: ' + err.message);
           } finally {
@@ -684,7 +684,7 @@
           statusLabel,
           statusBadgeClass,
           modalItem,
-          reportForm,
+          isLandItem,
           openReportModal,
           submitReportActive,
           confirmRemoveInternal

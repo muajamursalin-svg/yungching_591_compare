@@ -213,6 +213,12 @@ class T591ShopCrawler:
                 if fl in [0, 1, 99]:
                     fl = 99
 
+            # 判斷是否為土地
+            is_land = (shape == 0) or any(k in (kind + (h.get("fulladdress") or "") + (h.get("address") or "")) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            g_area = float(h.get("groundarea") or 0.0)
+            area_val = g_area if (is_land and g_area > 0) else float(h.get("area") or 0.0)
+            case_type_val = "土地" if is_land else (kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"))
+
             std_item = {
                 "platform": "591",
                 "house_id": hid,
@@ -223,13 +229,15 @@ class T591ShopCrawler:
                 "street": (h.get("street_name") or "").strip(),
                 "community_name": re.sub(r'<[^>]+>', '', h.get("cases_name") or "").strip(),
                 "price": p_val,
-                "reg_area": float(h.get("area") or 0.0),
+                "reg_area": area_val,
+                "land_area": g_area if g_area > 0 else area_val,
+                "is_land": is_land,
                 "main_area": float(h.get("mainarea") or 0.0) if h.get("mainarea") else None,
                 "floor": fl,
                 "all_floor": allfl,
                 "house_age": age_val,
                 "room": room,
-                "case_type": kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"),
+                "case_type": case_type_val,
                 "cover": h.get("cover") or "",
                 "agent_name": h.get("linkman") or ""
             }

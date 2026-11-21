@@ -241,6 +241,12 @@ class HousePrice5168Crawler:
                 if fl in [0, 1, 99]:
                     fl = 99
 
+            # 判斷是否為土地
+            is_land = any(k in (case_type + (c.get("purposeName") or "") + (c.get("caseName") or "")) for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"])
+            pin_val = float(c.get("buildPin") or c.get("landPin") or 0.0)
+            if is_land:
+                case_type = "土地"
+
             raw_age = float(c.get("buildAge") or 0.0) if c.get("buildAge") is not None else 0.0
 
             std_item = {
@@ -253,7 +259,9 @@ class HousePrice5168Crawler:
                 "street": (c.get("road") or "").strip(),
                 "community_name": (comm.get("communityName") or "").strip(),
                 "price": float(c.get("totalPrice") or 0.0),
-                "reg_area": float(c.get("buildPin") or 0.0),
+                "reg_area": pin_val,
+                "land_area": pin_val,
+                "is_land": is_land,
                 "main_area": float(c.get("mainPin") or 0.0) if c.get("mainPin") is not None else None,
                 "floor": int(fl),
                 "all_floor": int(allfl),

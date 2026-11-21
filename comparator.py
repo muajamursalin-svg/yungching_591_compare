@@ -33,27 +33,38 @@ def clean_text(s: str) -> str:
     s = re.sub(r'[\s\-_\/|~#🌸❤️⭐️✨【】\(\)（）\.\,，、]', '', s)
     return s.strip()
 
+def extract_section_name(text: str) -> str:
+    """
+    從地址或路名字串中萃取台灣土地段名 (例如: '青雲段', '丁台三段', '車籠埔段', '高鐵段')
+    """
+    if not text:
+        return ""
+    s = text.replace('臺', '台').strip()
+    s = re.sub(r'^(.*?([縣市]))?(.*?([區鄉鎮市]))?', '', s)
+    m = re.search(r'([\u4e00-\u9fa50-9一二三四五六七八九十]+段)', s)
+    if m:
+        sec = m.group(1).strip()
+        if not re.search(r'[路街道]\w*段$', sec):
+            return sec
+    return ""
+
 def generate_property_fingerprint(
     county: str,
     district: str,
     street: str,
     floor: Any,
     price: Any,
-    reg_area: Any
+    reg_area: Any,
+    is_land: bool = False
 ) -> str:
     """
     生成跨平台物業唯一指紋 (供全員共享「內部網頁已上架」比對使用)
-    規格：{county}_{district}_{street}_{floor}F_{price}M_{area}P
+    若為土地：{county}_{district}_{section}_land_{price}M_{area}P
+    若為房屋：{county}_{district}_{street}_{floor}F_{price}M_{area}P
     """
     c = clean_text(str(county or "")).replace('臺', '台')
     d = clean_text(str(district or "")).replace('臺', '台')
     s = clean_text(str(street or "")).replace('臺', '台')
-
-    try:
-        f = int(floor or 0)
-    except Exception:
-        f = 0
-    f_code = "99F" if f in [0, 99, -1] else f"{f}F"
 
     try:
         p = f"{float(price or 0.0):.1f}M"
@@ -64,6 +75,16 @@ def generate_property_fingerprint(
         a = f"{float(reg_area or 0.0):.1f}P"
     except Exception:
         a = "0.0P"
+
+    if is_land or s.endswith("段") or bool(extract_section_name(s)):
+        sec = extract_section_name(s) or s
+        return f"{c}_{d}_{sec}_land_{p}_{a}".lower()
+
+    try:
+        f = int(floor or 0)
+    except Exception:
+        f = 0
+    f_code = "99F" if f in [0, 99, -1] else f"{f}F"
 
     return f"{c}_{d}_{s}_{f_code}_{p}_{a}".lower()
 
@@ -168,6 +189,141 @@ class InventoryComparator:
         st1 = (h.get("street") or "").strip()
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
+
+        # 0. 判斷是否為「土地類型」物件 (段名不是路名、比對地坪、單純判斷縣市區域段名)
+        is_h_land = (
+            bool(h.get("is_land")) or 
+            any(k in (h.get("case_type") or "") for k in ["土地", "農地", "建地", "林地", "山坡地", "工商業地"]) or
+            any(k in t1 for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
+            bool(extract_section_name(st1))
+        )
+
+        if is_h_land:
+            h_sec = extract_section_name(st1) or extract_section_name(t1)
+            h_land_area = float(h.get("land_area") or h.get("reg_area") or a1 or 0.0)
+
+            land_candidates = []
+            for y in yc_list:
+                # 判斷永慶分店在庫物件是否為土地
+                is_y_land = (
+                    y.get("case_type") == "土地" or 
+                    y.get("purpose") == "土地" or 
+                    any(k in (y.get("case_name") or "") for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
+                    bool(extract_section_name(y.get("address") or ""))
+                )
+                if not is_y_land:
+                    continue
+
+                # 縣市比對
+                c1_norm = c1.replace('臺', '台')
+                c2_norm = (y.get("county") or "").strip().replace('臺', '台')
+                if c1_norm != c2_norm:
+                    continue
+
+                # 行政區比對
+                d2 = (y.get("district") or "").strip()
+                if d1 and d2 and d1 != d2:
+                    continue
+
+                # 段名比對 (核心：若雙方皆有段名，段名必須相同)
+                y_addr = (y.get("address") or "").strip()
+                y_case = (y.get("case_name") or "").strip()
+                y_sec = extract_section_name(y_addr) or extract_section_name(y_case)
+
+                if h_sec and y_sec and (h_sec != y_sec):
+                    continue
+                elif h_sec and not y_sec:
+                    if h_sec not in y_addr and h_sec not in y_case:
+                        continue
+                elif not h_sec and y_sec:
+                    if y_sec not in st1 and y_sec not in t1:
+                        continue
+
+                # 地坪比對 (容許誤差 <= 2.0 坪)
+                y_land_area = float(y.get("land_area") or y.get("reg_area") or 0.0)
+                diff_area = abs(h_land_area - y_land_area) if (h_land_area > 0 and y_land_area > 0) else 0.0
+                if h_land_area > 0 and y_land_area > 0 and diff_area > 2.0:
+                    continue
+
+                land_candidates.append((diff_area, y, y_sec))
+
+            if not land_candidates:
+                # 檢查是否有同仁手動回報之「內部網頁已上架」土地紀錄
+                if internal_list:
+                    h_fp = generate_property_fingerprint(c1, d1, h_sec or st1, 0, p1, h_land_area, is_land=True)
+                    for item in internal_list:
+                        matched_int = False
+                        if item.get("property_fingerprint") == h_fp:
+                            matched_int = True
+                        else:
+                            it_c = clean_text(item.get("county") or "").replace('臺', '台')
+                            it_d = clean_text(item.get("district") or "").replace('臺', '台')
+                            it_s = clean_text(item.get("street") or "").replace('臺', '台')
+                            it_sec = extract_section_name(it_s) or it_s
+                            if it_c == c1_norm and (not d1 or it_d == d1):
+                                if (h_sec and it_sec and h_sec == it_sec) or (st1 in it_s or it_s in st1):
+                                    it_p = float(item.get("price") or 0.0)
+                                    it_a = float(item.get("reg_area") or 0.0)
+                                    if abs(p1 - it_p) <= 50.0 and abs(h_land_area - it_a) <= 2.0:
+                                        matched_int = True
+
+                        if matched_int:
+                            rep_time = item.get("created_at") or "近期"
+                            rep_user = item.get("reported_by") or "店頭同仁"
+                            disp_sec = h_sec or "段名相符"
+                            reason = (
+                                f"🟢 內部網頁已上架 (同仁手動回報・全員共享)\n"
+                                f"• 物件類別：土地 ({disp_sec}｜地坪 {h_land_area}坪)\n"
+                                f"• 查驗狀態：確認物件存在於I智慧內部 (由 {rep_user} 查核確認)\n"
+                                f"• 回報時間：{rep_time}\n"
+                                f"• 說明：此土地物件在外網雖查無資料，但經同仁確認已在I智慧內部系統上架中。若後續外網正式同步上架，系統將自動納入在庫並畢業清理。"
+                            )
+                            pseudo_yc = {
+                                "case_sid": item.get("internal_case_no") or item.get("source_house_id"),
+                                "branch_id": "INTERNAL",
+                                "branch_name": f"內網已在庫 ({disp_sec})",
+                                "price": float(item.get("price") or p1),
+                                "from_floor": 0,
+                                "to_floor": 0,
+                                "up_floor": 0,
+                                "reg_area": float(item.get("reg_area") or h_land_area),
+                                "address": f"{item.get('county') or c1}{item.get('district') or d1}{disp_sec}",
+                                "case_name": item.get("case_name") or h.get("title") or "",
+                            }
+                            return pseudo_yc, "INTERNAL_ACTIVE", reason, 90.0
+
+                return None, "NOT_FOUND", f"🔴 分店目前無此土地庫存物件\n• 查無同段名【{h_sec or '地段'}】與地坪【{h_land_area}坪】之分店在庫紀錄", 0.0
+
+            # 排序候選：地坪誤差最小 > 價差最小
+            land_candidates.sort(key=lambda item: (
+                item[0],
+                abs(p1 - float(item[1].get("price") or 0.0))
+            ))
+            best_diff_a, best_y, best_y_sec = land_candidates[0]
+            p2 = float(best_y.get("price") or 0.0)
+            disp_sec = best_y_sec or h_sec or "段名相符"
+            y_land_area = float(best_y.get("land_area") or best_y.get("reg_area") or 0.0)
+
+            # 總價判斷 (價差 >= 1.0 萬)
+            diff_price = round(p1 - p2, 2)
+            if abs(diff_price) >= 1.0:
+                diff_label = f"永慶便宜 {abs(diff_price)}萬" if diff_price > 0 else f"{platform_name}便宜 {abs(diff_price)}萬"
+                reason = (
+                    f"💰 總價標價調整提示：\n"
+                    f"• 土地位置：{c1}{d1}【{disp_sec}】\n"
+                    f"• 土地坪數：{platform_name} 標 {h_land_area}坪 vs 永慶標 {y_land_area}坪 (地坪相符)\n"
+                    f"• 開價出入：{platform_name} 標 {p1}萬 vs 永慶分店標 {p2}萬 ({diff_label})"
+                )
+                return best_y, "PRICE_MISMATCH", reason, 90.0
+            else:
+                reason = (
+                    f"🟢 正常在售：土地縣市/區域/段名完全吻合\n"
+                    f"• 土地位置：{c1}{d1}【{disp_sec}】\n"
+                    f"• 地坪相符：{h_land_area}坪\n"
+                    f"• 總價一致：{p1}萬\n"
+                    f"• 永慶案名：{best_y.get('case_name')} (案號: {best_y.get('case_sid')})"
+                )
+                return best_y, "NORMAL", reason, 95.0
 
         # 1. 第一階段：硬性特徵比對 (支援 Pass 1: 嚴格樓層比對 與 Pass 2: 樓層容錯比對)
         def collect_candidates(floor_tolerance: bool = False):
@@ -726,14 +882,25 @@ class InventoryComparator:
             p_val = float(h.get("price") or 0.0)
             hid = str(h.get("house_id"))
             title = h.get("title") or ""
-            area_val = float(h.get("reg_area") or 0.0)
+            area_val = float(h.get("reg_area") or h.get("land_area") or 0.0)
             f_val = h.get("floor")
             allf_val = h.get("all_floor")
             to_f_val = h.get("to_floor")
-            if to_f_val and to_f_val > f_val and f_val != 99:
+
+            is_land = (
+                bool(h.get("is_land")) or 
+                (h.get("case_type") == "土地") or 
+                any(k in title for k in ["土地", "農地", "建地", "甲建", "乙建", "丙建", "丁建"]) or
+                bool(extract_section_name(h.get("street") or ""))
+            )
+
+            if is_land:
+                f_str = "土地"
+            elif to_f_val and to_f_val > f_val and f_val != 99:
                 f_str = f"{f_val}~{to_f_val}/{allf_val}樓"
             else:
                 f_str = f"{f_val}/{allf_val}" if f_val != 99 else f"整棟/{allf_val}"
+
             comm_val = h.get("community_name") or ""
             cover_val = h.get("cover") or ""
             h_url = h.get("url") or ""
@@ -747,7 +914,8 @@ class InventoryComparator:
                 try:
                     h_fp = generate_property_fingerprint(
                         h.get("county"), h.get("district"), h.get("street"),
-                        h.get("floor"), h.get("price"), h.get("reg_area")
+                        h.get("floor"), h.get("price"), area_val,
+                        is_land=is_land
                     )
                     self.db.execute(
                         "DELETE FROM internal_active_houses WHERE status = 'ACTIVE' AND property_fingerprint = ?;",
