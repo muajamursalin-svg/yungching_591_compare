@@ -987,11 +987,11 @@ function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
     return { type: "text", text: text };
   }
 
-  // 決定 Header 橫幅顏色與標題
+  // 決定 Header 橫幅：依使用者需求，只有庫存比對完成且有帶入 LIFF 儀表板時，最上方才顯示綠色 Header
   let headerColor = null;
   let headerTitle = null;
 
-  if (text.indexOf("比對完成") !== -1 || text.indexOf("比對報告") !== -1 || text.indexOf("比對結果總覽") !== -1) {
+  if (liffUrl && (text.indexOf("庫存比對結果總覽") !== -1 || text.indexOf("比對報告") !== -1)) {
     if (text.indexOf("快取") !== -1) {
       headerColor = "#00b900";
       headerTitle = "⚡ 庫存比對完成（快取紀錄 ✔）";
@@ -999,12 +999,6 @@ function buildInteractiveMessage(text, userShops, liffUrl, customButtons) {
       headerColor = "#06C755";
       headerTitle = "✅ 庫存比對完成 ✔";
     }
-  } else if (text.indexOf("⚠️") !== -1 || text.indexOf("異常") !== -1 || text.indexOf("失敗") !== -1) {
-    headerColor = "#e53e3e";
-    headerTitle = "⚠️ 系統提示";
-  } else if (text.indexOf("處理中") !== -1 || text.indexOf("稍後") !== -1 || text.indexOf("啟動") !== -1) {
-    headerColor = "#0084ff";
-    headerTitle = "⏳ 比對任務處理中";
   }
 
   // 摘要標題用於推播與無障礙視窗

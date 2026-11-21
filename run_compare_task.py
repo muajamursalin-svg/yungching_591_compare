@@ -92,23 +92,17 @@ def build_interactive_message(db_client: Optional[TursoClient], user_id: str, me
     if len(alt_text) > 40:
         alt_text = alt_text[:37] + "..."
 
-    # 決定 Header 橫幅顏色與標題
+    # 決定 Header 橫幅：依使用者需求，只有庫存比對完成且有帶入 LIFF 儀表板時，最上方才顯示綠色 Header
     header_color = None
     header_title = None
 
-    if "比對完成" in message or "比對報告" in message or "比對結果總覽" in message:
+    if liff_url and ("比對完成" in message or "比對報告" in message or "比對結果總覽" in message):
         if "快取" in message:
             header_color = "#00b900"
             header_title = "⚡ 庫存比對完成（快取紀錄 ✔）"
         else:
             header_color = "#06C755"
             header_title = "✅ 庫存比對完成 ✔"
-    elif "⚠️" in message or "異常" in message or "失敗" in message:
-        header_color = "#e53e3e"
-        header_title = "⚠️ 系統提示"
-    elif "刷新" in message or "稍後" in message:
-        header_color = "#dd6b20"
-        header_title = "⏳ 處理中請稍候"
 
     if header_title:
         alt_text = header_title
