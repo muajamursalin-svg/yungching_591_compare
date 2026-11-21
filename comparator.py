@@ -315,6 +315,72 @@ class InventoryComparator:
         addr2 = (best_y.get("address") or "").strip()
         case2 = (best_y.get("case_name") or "").strip()
 
+        # 尋找在庫中「同樓層/同社區」的其他候選戶別 (供使用者比對參考)
+        best_sid = best_y.get("case_sid")
+        best_f2 = int(best_y.get("from_floor") or 0)
+        best_comm = clean_text(best_y.get("community_name") or "")
+        siblings = []
+        for y in yc_list:
+            if y.get("case_sid") == best_sid:
+                continue
+            if (y.get("county") or "").strip().replace('臺', '台') != c1.replace('臺', '台'):
+                continue
+            y_f2 = int(y.get("from_floor") or 0)
+            y_to_f2 = int(y.get("to_floor") or 0)
+            y_eff_f2 = y_to_f2 if y_to_f2 > 0 else y_f2
+
+            is_same_f = False
+            if best_f2 > 0 and best_f2 != 99:
+                is_same_f = (y_f2 == best_f2 or y_eff_f2 == best_f2 or y_f2 == f1 or y_eff_f2 == f1)
+            elif best_f2 == 99 or f1 == 99:
+                is_same_f = (y_f2 in [-1, 0, 1, 99])
+            if not is_same_f:
+                continue
+
+            y_comm2 = clean_text(y.get("community_name") or "")
+            y_case2 = clean_text(y.get("case_name") or "")
+            y_addr2 = (y.get("address") or "").strip().replace('臺', '台')
+
+            c_match = False
+            if comm1 and y_comm2 and (comm1 in y_comm2 or y_comm2 in comm1):
+                c_match = True
+            elif best_comm and y_comm2 and (best_comm in y_comm2 or y_comm2 in best_comm):
+                c_match = True
+            elif y_comm2 and (y_comm2 in t1 or y_comm2 in clean_text(best_y.get("case_name") or "")):
+                c_match = True
+
+            if (comm1 or best_comm):
+                if not c_match:
+                    continue
+            else:
+                s_match = bool(st1 and (st1.replace('臺', '台') in y_addr2 or st1.replace('臺', '台') in y_case2))
+                if not s_match:
+                    continue
+
+            y_a2 = float(y.get("reg_area") or 0.0)
+            max_area_diff = 15.0 if (f1 == 99 or best_f2 == 99) else 5.0
+            if abs(a1 - y_a2) > max_area_diff:
+                continue
+            siblings.append(y)
+
+        siblings.sort(key=lambda item: float(item.get("price") or 0.0))
+        sibling_note = ""
+        if siblings:
+            sibling_lines = ["\n💡 在庫另有同樓層/同社區多戶候選參考："]
+            for s in siblings[:3]:
+                s_p = float(s.get("price") or 0.0)
+                s_a = float(s.get("reg_area") or 0.0)
+                s_f = int(s.get("from_floor") or 0)
+                s_f_disp = f"{s_f}樓" if s_f != 99 else "整棟"
+                s_name = (s.get("case_name") or "").strip()
+                s_sid = s.get("case_sid")
+                sibling_lines.append(f"• 永慶案名：{s_name} (SID: {s_sid})｜開價 {s_p}萬｜{s_f_disp}｜{s_a}坪")
+            sibling_note = "\n" + "\n".join(sibling_lines)
+
+        def make_return(st: str, rz: str):
+            final_reason = (rz + sibling_note) if sibling_note else rz
+            return best_y, st, final_reason, confidence
+
         # 總價判斷
         diff_price = round(p1 - p2, 2)
         has_price_diff = abs(diff_price) >= 1.0
@@ -367,7 +433,7 @@ class InventoryComparator:
                 f"• {platform_name} 標示樓層：{f1_desc} vs 永慶標示樓層：{f2_desc}\n"
                 f"• 社區名稱、總價 ({p1}萬)、建坪 ({a1}坪)、總樓高 ({allf1 or allf2}樓)、路名等其他主要條件均吻合"
             )
-            return best_y, status, reason, confidence
+            return make_return(status, reason)
 
         # 特殊判斷 1：僅屋齡有出入，其他條件 (總價/建坪/樓層/總高/路名) 皆吻合
         if not has_price_diff and not has_allf_diff and not has_street_diff and not has_floor_range_diff and has_age_diff:
@@ -378,7 +444,7 @@ class InventoryComparator:
                 f"• {platform_name} 標示屋齡：{age1} 年 vs 永慶標示屋齡：{age2} 年\n"
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、樓層 ({f_disp})、總樓高 ({allf1}樓)、路名等其他條件皆完全相符"
             )
-            return best_y, status, reason, confidence
+            return make_return(status, reason)
 
         # 特殊判斷 2：僅總樓高有出入，其他條件 (總價/建坪/樓層/屋齡/路名) 皆吻合
         if not has_price_diff and not has_age_diff and not has_street_diff and not has_floor_range_diff and has_allf_diff:
@@ -389,7 +455,7 @@ class InventoryComparator:
                 f"• {platform_name} 標 {allf1} 樓高 vs 永慶標 {allf2} 樓高\n"
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、樓層 ({f_disp})、屋齡 ({age1}年)、路名皆完全相符"
             )
-            return best_y, status, reason, confidence
+            return make_return(status, reason)
 
         # 特殊判斷 3：縣市區域、建坪、樓層、總價、總樓高、屋齡都一樣，只有路名不同
         if not has_price_diff and not has_allf_diff and not has_age_diff and not has_floor_range_diff and has_street_diff:
@@ -400,7 +466,7 @@ class InventoryComparator:
                 f"• {platform_name} 路名:「{st1}」\n"
                 f"• 永慶地址:「{addr2}」"
             )
-            return best_y, status, reason, confidence
+            return make_return(status, reason)
 
         # 特殊判斷 4：僅樓層規劃有區間出入 (無價差/無總高差/無屋齡差/無路名差)
         if not has_price_diff and not has_allf_diff and not has_age_diff and not has_street_diff and has_floor_range_diff:
@@ -413,7 +479,7 @@ class InventoryComparator:
                 f"• 兩者樓層雖有交集，但單層與樓中樓規劃不同，可能為不同戶別或案源出入\n"
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、屋齡 ({age1}年)、總樓高皆相符"
             )
-            return best_y, status, reason, confidence
+            return make_return(status, reason)
 
         # 多重異常排除 (黃金準則：若出現 3 個或以上錯誤，或無社區吻合且路名出入+顯著價差，判定為不同物件 NOT_FOUND)
         if len(anomalies) >= 3:
@@ -441,7 +507,7 @@ class InventoryComparator:
                 f"• 總樓高與路名皆相符"
             )
 
-        return best_y, status, reason, confidence
+        return make_return(status, reason)
 
     def run_comparison(
         self,
