@@ -3,6 +3,8 @@ import re
 import json
 import time
 import requests
+import urllib.request
+import ssl
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
@@ -45,6 +47,47 @@ class T591ShopCrawler:
         except ValueError:
             return 0.0
 
+    @staticmethod
+    def fetch_land_section(hid: str) -> str:
+        """
+        針對 591 土地案件，店鋪列表 API 缺失段名欄位時，向 591 內部詳細頁底層結構化資料再次查詢
+        嚴格由底層結構化資料 (Schema.org / Nuxt 地段欄位) 獲取段名，絕對不能從標題猜測判斷
+        """
+        if not hid:
+            return ""
+        url = f"https://sale.591.com.tw/home/house/detail/2/{hid}.html"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+                chunk = resp.read(35000).decode("utf-8", errors="ignore")
+                # 1. 優先從 Schema.org streetAddress 結構化欄位萃取段名
+                m = re.search(r'"streetAddress":\s*"([^"]+)"', chunk)
+                if m:
+                    s = m.group(1).replace('臺', '台').strip()
+                    sec_m = re.search(r'([\u4e00-\u9fa50-9一二三四五六七八九十]+段)', s)
+                    if sec_m:
+                        return sec_m.group(1).strip()
+                # 2. 次選從內嵌資料之地段屬性取得
+                m_sec = re.search(r'"name":\s*"(?:地段|段名)",\s*"value":\s*"([^"]+)"', chunk)
+                if m_sec:
+                    sec = m_sec.group(1).strip()
+                    return sec if sec.endswith("段") else f"{sec}段"
+                # 3. 備選 segment 屬性標籤
+                m_seg = re.search(r'segment="([^"]+)"', chunk)
+                if m_seg:
+                    seg = m_seg.group(1).strip()
+                    return seg if seg.endswith("段") else f"{seg}段"
+        except Exception as e:
+            print(f"[Warn] 查詢 591 土地案件 {hid} 內部段名失敗: {e}")
+        return ""
+
     def fetch_all_houses(self, shop_id: str) -> List[Dict[str, Any]]:
         all_houses = []
         first_row = 0
@@ -76,6 +119,23 @@ class T591ShopCrawler:
             print(f"  [591 店鋪 {shop_id}] 已抓取 {len(all_houses)} 筆物件...")
             first_row += len(items)
             time.sleep(0.3)
+
+        # 針對土地物件 (shape == 0 或 kind_name == '土地')，若 street_name 缺失段名，統一透過輕量查詢內部結構化資料補齊
+        land_items = [
+            h for h in all_houses 
+            if (int(h.get("shape") or 0) == 0 or h.get("kind_name") == "土地")
+            and not (h.get("street_name") and "段" in str(h.get("street_name")))
+        ]
+        if land_items:
+            print(f"  [591 土地段名補齊] 偵測到 {len(land_items)} 筆土地物件，從底層結構化資料獲取段名...")
+            from concurrent.futures import ThreadPoolExecutor
+            def _enrich_land(h_dict):
+                hid = str(h_dict.get("id") or h_dict.get("houseid"))
+                sec = T591ShopCrawler.fetch_land_section(hid)
+                if sec:
+                    h_dict["street_name"] = sec
+            with ThreadPoolExecutor(max_workers=min(5, len(land_items))) as executor:
+                list(executor.map(_enrich_land, land_items))
 
         return all_houses
 
@@ -221,6 +281,12 @@ class T591ShopCrawler:
             area_val = g_area if (is_land and g_area > 0) else reg_area_val
             case_type_val = "土地" if is_land else (kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"))
 
+            st_name = (h.get("street_name") or "").strip()
+            if is_land and not (st_name and "段" in st_name):
+                sec = T591ShopCrawler.fetch_land_section(hid)
+                if sec:
+                    st_name = sec
+
             std_item = {
                 "platform": "591",
                 "house_id": hid,
@@ -228,7 +294,7 @@ class T591ShopCrawler:
                 "url": f"https://sale.591.com.tw/sale-detail-{hid}.html",
                 "county": (h.get("regionname") or "").strip(),
                 "district": (h.get("sectionname") or "").strip(),
-                "street": (h.get("street_name") or "").strip(),
+                "street": st_name,
                 "community_name": re.sub(r'<[^>]+>', '', h.get("cases_name") or "").strip(),
                 "price": p_val,
                 "reg_area": area_val,

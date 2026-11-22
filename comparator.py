@@ -194,7 +194,8 @@ class InventoryComparator:
         is_h_land = bool(h.get("is_land")) or (h.get("case_type") == "土地")
 
         if is_h_land:
-            h_sec = extract_section_name(st1) or extract_section_name(t1)
+            # 土地段名統一由底層 API 結構化欄位 (street) 取得，絕對不能從標題行銷詞 (title) 猜測判斷
+            h_sec = extract_section_name(st1) or (st1 if st1.endswith("段") else "")
             h_land_area = float(h.get("land_area") or h.get("reg_area") or a1 or 0.0)
 
             land_candidates = []
@@ -226,7 +227,8 @@ class InventoryComparator:
                     if h_sec not in y_addr and h_sec not in y_case:
                         continue
                 elif not h_sec and y_sec:
-                    if y_sec not in st1 and y_sec not in t1:
+                    # 591 缺失段名且永慶有段名時，若 street 無該段名則排除 (絕不以標題 title 判斷)
+                    if y_sec not in st1:
                         continue
 
                 # 地坪比對 (容許誤差 <= 2.0 坪)
