@@ -45,6 +45,25 @@
       </div>
     </header>
 
+    <!-- 主視角切換頁籤 (比對診斷 / 分店庫存變化) -->
+    <div class="bg-white border-b border-slate-200 px-4 py-2 sticky top-[72px] sm:top-[76px] z-20 shadow-sm flex items-center gap-2">
+      <button 
+        @click="mainView = 'compare'"
+        :class="mainView === 'compare' ? 'bg-emerald-600 text-white font-bold shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+        class="flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition flex items-center justify-center gap-1.5"
+      >
+        <span>🔍</span> 比對診斷
+      </button>
+      <button 
+        @click="switchToTrends()"
+        :class="mainView === 'trends' ? 'bg-emerald-600 text-white font-bold shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+        class="flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition flex items-center justify-center gap-1.5"
+      >
+        <span>📈</span> 分店庫存變化
+        <span v-if="priceChangedHouses.length > 0" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+      </button>
+    </div>
+
     <!-- 載入中狀態 -->
     <div v-if="loading" class="flex flex-col items-center justify-center p-12 text-slate-400">
       <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600 mb-3"></div>
@@ -57,8 +76,8 @@
       <div>{{ error }}</div>
     </div>
 
-    <!-- 報告主體內容 -->
-    <main v-else-if="report" class="p-4 space-y-4">
+    <!-- 報告主體內容 (比對診斷視角) -->
+    <main v-else-if="report && mainView === 'compare'" class="p-4 space-y-4">
       <!-- 統計數據卡片 (4個圖卡一行顯示) -->
       <div class="grid grid-cols-4 gap-2">
         <!-- 1. 平台總在售 -->
@@ -227,6 +246,187 @@
       </div>
     </main>
 
+    <!-- 分店庫存動態視角 (價格變化軌跡 + 本週下架) -->
+    <main v-if="mainView === 'trends'" class="p-4 space-y-4">
+      <!-- 統計圖卡 -->
+      <div class="grid grid-cols-2 gap-2">
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+          <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
+            <span>🔥</span> 價格異動物件
+          </div>
+          <div class="text-xl font-bold text-amber-600 mt-0.5">
+            {{ priceChangedHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
+          </div>
+        </div>
+
+        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+          <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
+            <span>📦</span> 本週下架物件
+          </div>
+          <div class="text-xl font-bold text-slate-700 mt-0.5">
+            {{ weeklyOfflineHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 區塊一：價格異動物件與軌跡 -->
+      <section class="space-y-3">
+        <div class="flex items-center justify-between border-b pb-1.5 border-slate-200">
+          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <span>🏷️</span> 分店價格異動物件
+            <span class="text-[11px] font-normal text-slate-500">({{ priceChangedHouses.length }} 件)</span>
+          </h2>
+          <button @click="loadInventoryTrends(true)" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
+            <span>🔄</span> 重新整理
+          </button>
+        </div>
+
+        <div v-if="loadingTrends" class="flex flex-col items-center justify-center py-8 text-slate-400">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mb-2"></div>
+          <p class="text-xs">正在載入價格異動與下架紀錄...</p>
+        </div>
+
+        <div v-else-if="priceChangedHouses.length === 0" class="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-1">
+          <div class="text-2xl">✨</div>
+          <div class="text-xs font-medium text-slate-600">目前分店庫存無價格變動紀錄</div>
+          <div class="text-[11px] text-slate-400">待後續定時同步偵測到開價調整時，將即時自動收錄於此</div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div 
+            v-for="house in priceChangedHouses" 
+            :key="house.case_sid" 
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:border-slate-300 transition-all p-3.5 space-y-3"
+          >
+            <!-- 物件頭部資訊 -->
+            <div class="flex gap-3">
+              <img 
+                :src="formatYcCover(house.cover)" 
+                class="w-20 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0"
+                alt="物件照片"
+              >
+              <div class="flex-1 min-w-0">
+                <div class="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded inline-block mb-1">
+                  {{ house.branch_name }}
+                </div>
+                <h3 class="text-xs sm:text-sm font-bold text-slate-900 leading-snug line-clamp-1">
+                  {{ house.case_name }}
+                </h3>
+                <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                  <span v-if="house.community_name">🏢 {{ house.community_name }}</span>
+                  <span v-if="house.reg_area">📐 {{ house.reg_area }}坪</span>
+                </div>
+                <div class="text-[11px] text-slate-400 truncate">
+                  📍 {{ house.address }}
+                </div>
+              </div>
+            </div>
+
+            <!-- 價格變化 Highlight 區塊 -->
+            <div class="bg-amber-50/70 border border-amber-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs">
+              <div>
+                <div class="text-[10px] text-slate-500">初次刊登開價</div>
+                <div class="text-slate-600 font-semibold line-through">{{ house.first_price }} 萬</div>
+              </div>
+              <div class="text-slate-300 text-lg font-light">➔</div>
+              <div>
+                <div class="text-[10px] text-slate-500">最新在售開價</div>
+                <div class="text-sm font-bold text-amber-700">{{ house.latest_price }} 萬</div>
+              </div>
+              <div class="text-right">
+                <span 
+                  :class="house.total_price_diff < 0 ? 'bg-red-500 text-white' : 'bg-emerald-600 text-white'"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full inline-block shadow-sm"
+                >
+                  {{ house.total_price_diff < 0 ? `↓ 降 ${Math.abs(house.total_price_diff)} 萬 (${house.total_percent_change}%)` : `↑ 調漲 ${house.total_price_diff} 萬 (+${house.total_percent_change}%)` }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 歷史調價軌跡時間軸 -->
+            <div class="bg-slate-50 rounded-xl p-2.5 border border-slate-100 text-[11px] space-y-1.5">
+              <div class="font-bold text-slate-700 flex items-center gap-1">
+                <span>🕒</span> 價格變動軌跡時間軸：
+              </div>
+              <div class="space-y-1 pl-2 border-l-2 border-amber-400 ml-1">
+                <div v-for="(hItem, hIdx) in house.history" :key="hIdx" class="text-slate-600 flex justify-between items-center text-[10px] sm:text-[11px]">
+                  <span>• {{ hItem.time }}</span>
+                  <span>{{ hItem.from_price }} ➔ <strong>{{ hItem.to_price }} 萬</strong></span>
+                  <span :class="hItem.diff < 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'">
+                    ({{ hItem.diff < 0 ? `降 ${Math.abs(hItem.diff)}萬` : `漲 ${hItem.diff}萬` }})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 查看永慶官網按鈕 -->
+            <a 
+              :href="'https://buy.yungching.com.tw/house/' + house.case_sid" 
+              target="_blank"
+              class="w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition"
+            >
+              <span>🔗</span> 查看永慶官網刊登
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- 區塊二：本週下架物件 -->
+      <section class="space-y-3 pt-3 border-t border-slate-200">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <span>📦</span> 本週下架物件
+              <span class="text-[11px] font-normal text-slate-500">({{ weeklyOfflineHouses.length }} 件)</span>
+            </h2>
+            <div class="text-[10px] text-slate-400 mt-0.5">
+              統計週期：{{ weekRangeText }}（每週一 00:00 自動歸零重新統計）
+            </div>
+          </div>
+        </div>
+
+        <div v-if="weeklyOfflineHouses.length === 0" class="bg-white p-6 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-1">
+          <div class="text-xl">✨</div>
+          <div class="text-xs font-medium text-slate-600">本週目前尚無下架物件紀錄</div>
+          <div class="text-[10px] text-slate-400">當分店庫存物件下架或成交時，將自動列於此區供同仁追蹤</div>
+        </div>
+
+        <div v-else class="space-y-2.5">
+          <div 
+            v-for="house in weeklyOfflineHouses" 
+            :key="house.case_sid" 
+            class="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex gap-3 items-center opacity-85 hover:opacity-100 transition"
+          >
+            <img 
+              :src="formatYcCover(house.cover)" 
+              class="w-16 h-14 object-cover rounded-lg bg-slate-100 flex-shrink-0 grayscale"
+              alt="下架照片"
+            >
+            <div class="flex-1 min-w-0 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                  {{ house.branch_name || '永慶分店' }}
+                </span>
+                <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                  已下架
+                </span>
+              </div>
+              <h3 class="font-bold text-slate-800 truncate mt-0.5">
+                {{ house.case_name }}
+              </h3>
+              <div class="text-[11px] text-slate-500 flex justify-between mt-0.5">
+                <span>下架前開價: <strong class="text-slate-700">{{ house.price }} 萬</strong></span>
+                <span v-if="house.reg_area">{{ house.reg_area }} 坪</span>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-0.5">
+                🕒 下架時間: {{ house.offline_at || '本週' }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <!-- 回報內部網頁已上架確認彈窗 Modal -->
     <div v-if="modalItem" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
@@ -291,6 +491,126 @@
         const liveYcSyncTime = ref('');
 
         const modalItem = ref(null);
+
+        // 主視角切換 (compare: 比對診斷, trends: 分店庫存變化)
+        const mainView = ref('compare');
+        const loadingTrends = ref(false);
+        const trendsError = ref(null);
+        const priceChangedHouses = ref([]);
+        const weeklyOfflineHouses = ref([]);
+
+        function formatYcCover(raw) {
+          if (!raw) return 'https://via.placeholder.com/128x92?text=無照片';
+          let url = raw.replace('{0}', '240').replace('{1}', '180');
+          if (url.startsWith('//')) url = 'https:' + url;
+          return url;
+        }
+
+        function getMondayThisWeek() {
+          const d = new Date();
+          const day = d.getDay();
+          const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+          const monday = new Date(d.setDate(diff));
+          const y = monday.getFullYear();
+          const m = String(monday.getMonth() + 1).padStart(2, '0');
+          const dt = String(monday.getDate()).padStart(2, '0');
+          return `${y}-${m}-${dt} 00:00:00`;
+        }
+
+        const weekRangeText = computed(() => {
+          const mStr = getMondayThisWeek().split(' ')[0];
+          return `${mStr} 起`;
+        });
+
+        async function loadInventoryTrends(force = false) {
+          if (loadingTrends.value) return;
+          if (!force && priceChangedHouses.value.length > 0 && weeklyOfflineHouses.value.length > 0) return;
+          try {
+            loadingTrends.value = true;
+            trendsError.value = null;
+
+            // 1. 撈取價格歷史紀錄 (按時間降序)
+            const logsSql = `
+              SELECT * FROM house_price_logs 
+              ORDER BY changed_at ASC;
+            `;
+            const logs = await queryTurso(logsSql);
+
+            // 整理成每個物件的軌跡 (Group by case_sid)
+            const groupMap = {};
+            logs.forEach(log => {
+              const sid = log.case_sid;
+              if (!groupMap[sid]) {
+                groupMap[sid] = {
+                  case_sid: sid,
+                  branch_name: log.branch_name || '永慶分店',
+                  case_name: log.case_name || '未命名案件',
+                  county: log.county || '',
+                  district: log.district || '',
+                  address: log.address || '',
+                  community_name: log.community_name || '',
+                  reg_area: log.reg_area || 0,
+                  cover: log.cover || '',
+                  first_price: log.old_price,
+                  latest_price: log.new_price,
+                  total_price_diff: 0,
+                  total_percent_change: 0,
+                  last_changed_at: log.changed_at,
+                  history: [
+                    {
+                      time: log.changed_at,
+                      from_price: log.old_price,
+                      to_price: log.new_price,
+                      diff: log.price_diff,
+                      pct: log.percent_change
+                    }
+                  ]
+                };
+              } else {
+                groupMap[sid].latest_price = log.new_price;
+                groupMap[sid].last_changed_at = log.changed_at;
+                groupMap[sid].history.push({
+                  time: log.changed_at,
+                  from_price: log.old_price,
+                  to_price: log.new_price,
+                  diff: log.price_diff,
+                  pct: log.percent_change
+                });
+              }
+            });
+
+            const list = Object.values(groupMap).map(item => {
+              item.total_price_diff = Math.round((item.latest_price - item.first_price) * 100) / 100;
+              item.total_percent_change = item.first_price > 0 ? Math.round(((item.latest_price - item.first_price) / item.first_price) * 1000) / 10 : 0;
+              return item;
+            });
+
+            list.sort((a, b) => new Date(b.last_changed_at) - new Date(a.last_changed_at));
+            priceChangedHouses.value = list;
+
+            // 2. 撈取本週下架物件 (每週一 00:00:00 起算)
+            const mondayStr = getMondayThisWeek();
+            const offlineSql = `
+              SELECT y.*, b.name as branch_name 
+              FROM yungching_houses y
+              LEFT JOIN branches b ON y.branch_id = b.branch_id
+              WHERE y.status = 'OFFLINE' AND y.offline_at >= ?
+              ORDER BY y.offline_at DESC;
+            `;
+            weeklyOfflineHouses.value = await queryTurso(offlineSql, [mondayStr]);
+
+          } catch (err) {
+            console.error("載入分店庫存動態失敗:", err);
+            trendsError.value = err.message;
+          } finally {
+            loadingTrends.value = false;
+          }
+        }
+
+        function switchToTrends() {
+          mainView.value = 'trends';
+          loadInventoryTrends();
+        }
 
         // 從 URL 取得 report_id 或 shop_id，以及可選的 API 來源
         const urlParams = new URLSearchParams(window.location.search);
@@ -785,7 +1105,16 @@
           isLandItem,
           openReportModal,
           submitReportActive,
-          confirmRemoveInternal
+          confirmRemoveInternal,
+          mainView,
+          loadingTrends,
+          trendsError,
+          priceChangedHouses,
+          weeklyOfflineHouses,
+          formatYcCover,
+          weekRangeText,
+          loadInventoryTrends,
+          switchToTrends
         };
       }
     }).mount('#app');
