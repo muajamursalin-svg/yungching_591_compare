@@ -178,7 +178,7 @@ class InventoryComparator:
         
         回傳: (best_yc_match, status, reason, confidence_score)
         """
-        platform_name = h.get("platform") or "平台"
+        platform_name = h.get("platform") or "591"
         c1 = (h.get("county") or "").strip()
         d1 = (h.get("district") or "").strip()
         f1 = int(h.get("floor") or 0)
@@ -409,18 +409,30 @@ class InventoryComparator:
                         if diff_p > 80.0 and (diff_p / max(p1, p2)) > 0.05:
                             continue
 
-                # 建物登記坪數 (容許誤差 <= 1.5 坪)
+                # 建物登記坪數容許誤差比對：
+                # 若為「同縣市/區域/路名(或社區)/同開價/同樓層/同總高」之強特徵候選，容許建坪誤差放寬至 5.0 坪 (留至第二階段標註為規格不符)
+                # 其他一般物件仍嚴格限制 <= 1.5 坪
                 a2 = float(y.get("reg_area") or 0.0)
                 diff_area = abs(a1 - a2)
-                if diff_area > 1.5:
+                p2 = float(y.get("price") or 0.0)
+                diff_p = abs(p1 - p2) if (p1 > 0 and p2 > 0) else 999.0
+                diff_allf = abs(allf1 - up_f2) if (allf1 > 0 and up_f2 > 0) else 0
+
+                is_exact_floor = (
+                    (f1 == f2 and (to_f1 == effective_to_f2 or (to_f1 <= f1 and effective_to_f2 <= f2))) or 
+                    (f1 in [0, 1, 99] and f2 in [0, 1, 99])
+                )
+                is_exact_all_floor = (diff_allf <= 1)
+                is_strong_feature = (comm_match or st_match) and is_exact_floor and (diff_p <= 1.0) and is_exact_all_floor
+
+                max_diff_area = 5.0 if is_strong_feature else 1.5
+                if diff_area > max_diff_area:
                     continue
 
                 # 總樓高比對：
                 # 1. 若社區吻合，留至第二階段提示 (避免因地下室或頂樓計算出入被誤判下架)
                 # 2. 若路名吻合、總價極度接近 (<= 10萬) 且坪數吻合 (<= 1.5坪)，留至第二階段提示 (避免透天豪墅因權狀層數 vs 現況層數計算出入被誤判下架)
                 # 3. 其他情況，總樓高容許誤差 <= 1 樓
-                p2 = float(y.get("price") or 0.0)
-                diff_p = abs(p1 - p2) if (p1 > 0 and p2 > 0) else 999.0
                 is_exact_match = st_match and diff_p <= 10.0 and diff_area <= 1.5
 
                 if not comm_match and not is_exact_match and allf1 > 0 and up_f2 > 0:
@@ -595,6 +607,8 @@ class InventoryComparator:
         # 2. 第二階段：細節差異診斷
         anomalies = []
         p2 = float(best_y.get("price") or 0.0)
+        a2 = float(best_y.get("reg_area") or 0.0)
+        diff_area = round(abs(a1 - a2), 2)
         allf2 = int(best_y.get("up_floor") or 0)
         age2 = float(best_y.get("build_age") or 0.0)
         addr2 = (best_y.get("address") or "").strip()
@@ -673,6 +687,11 @@ class InventoryComparator:
         if has_price_diff:
             diff_label = f"永慶便宜 {abs(diff_price)}萬" if diff_price > 0 else f"{platform_name}便宜 {abs(diff_price)}萬"
             anomalies.append(f"總價不一致：{platform_name} 標 {p1}萬 vs 永慶標 {p2}萬 ({diff_label})")
+
+        # 建物坪數判斷 (若差異 > 1.5 坪，提示出入，可能為車位合併計算或登記出入)
+        has_area_diff = diff_area > 1.5
+        if has_area_diff:
+            anomalies.append(f"建物坪數出入：{platform_name} 標 {a1}坪 vs 永慶標 {a2}坪 (差異 {round(diff_area, 2)}坪，疑似車位合併計算或登打出入)")
 
         # 總樓高判斷
         has_allf_diff = False
@@ -765,6 +784,18 @@ class InventoryComparator:
                 f"• {platform_name} 標示樓層：{f1_desc} vs 永慶標示樓層：{f2_desc}\n"
                 f"• 兩者樓層雖有交集，但單層與樓中樓規劃不同，可能為不同戶別或案源出入\n"
                 f"• 總價 ({p1}萬)、建坪 ({a1}坪)、屋齡 ({age1}年)、總樓高皆相符"
+            )
+            return make_return(status, reason)
+
+        # 特殊判斷 5：縣市區域、路名/社區、樓層、總價、總樓高皆一致，僅建坪有出入
+        if not has_price_diff and not has_allf_diff and not has_street_diff and not has_floor_range_diff and has_area_diff:
+            status = "SPEC_MISMATCH"
+            f_disp = f"{f1}樓" if f1 not in [0, 99] else "整棟"
+            comm_info = f"社區【{comm1 or best_comm}】、" if (comm1 or best_comm) else ""
+            reason = (
+                f"⚠️ 規格不符提示：建物坪數出入 (其餘核心特徵皆完全吻合)\n"
+                f"• {platform_name} 標示建坪：{a1} 坪 vs 永慶分店標示：{a2} 坪 (差異 {round(diff_area, 2)} 坪，疑似車位坪數合併計算或登打出入)\n"
+                f"• 其餘條件完全吻合：{comm_info}總價 ({p1}萬)、樓層 ({f_disp})、總樓高 ({allf1 or allf2}樓)、行政區路名皆高度相符"
             )
             return make_return(status, reason)
 
