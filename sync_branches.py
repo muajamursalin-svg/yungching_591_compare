@@ -140,6 +140,32 @@ class YungchingBranchSyncer:
 
         return all_houses
 
+    def verify_case_is_offline(self, case_sid: int) -> bool:
+        """
+        二階段官網終極核實 (Double-Check)：
+        直接查詢 https://buy.yungching.com.tw/house/{case_sid}
+        回傳 True 表示真下架 (404 或 頁面包含結案/下架提示)；
+        回傳 False 表示假警報 (網頁存在且正常在售，維持 ONLINE)
+        """
+        url = f"https://buy.yungching.com.tw/house/{case_sid}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Referer": "https://buy.yungching.com.tw/",
+        }
+        try:
+            res = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+            if res.status_code == 404:
+                return True
+            text = res.text
+            if "此物件已結案" in text or "此物件已下架" in text or "此物件已售出" in text or "找不到此物件" in text:
+                return True
+            if res.status_code == 200:
+                return False
+            return True
+        except Exception as e:
+            print(f"    [Warn] 二次核實物件 {case_sid} 連線失敗 ({e})，安全起見暫不判定下架")
+            return False
+
     def sync_branch(self, branch_cfg: dict):
         branch_id = branch_cfg["branch_id"]
         now_str = get_tw_now_str()
@@ -372,13 +398,21 @@ class YungchingBranchSyncer:
                 else:
                     unchanged_count += 1
 
-        # 5. 判定本次下架名單 (DB 有且為 ONLINE，但本次爬取未出現)
+        # 5. 判定本次下架名單 (DB 有且為 ONLINE，但本次爬取未出現 -> 啟動二階段官網終極核實)
         to_deactivate_stmts = []
         deactivate_sql = "UPDATE yungching_houses SET status = 'OFFLINE', offline_at = ? WHERE case_sid = ?;"
         for sid, ex in db_map.items():
             if sid not in incoming_sids:
                 if (ex.get("status") or "") != "OFFLINE":
-                    to_deactivate_stmts.append((deactivate_sql, [now_str, sid]))
+                    # 二階段官網終極核實：先發輕量請求確認該物件是否在官網真下架
+                    name_snippet = (ex.get('case_name') or '')[:18]
+                    print(f"  🔍 [核實] 案號 {sid} ({name_snippet}) 列表中未出現，執行官網頁面真下架查證...")
+                    is_really_offline = self.verify_case_is_offline(sid)
+                    if is_really_offline:
+                        print(f"    ❌ 確認已成交結案/下架: {sid}")
+                        to_deactivate_stmts.append((deactivate_sql, [now_str, sid]))
+                    else:
+                        print(f"    🟢 官網查核仍正常在售 (分頁飄移假警報，維持 ONLINE): {sid}")
 
         # 6. 批次提交變更至 Turso (分段 batch 寫入)
         all_batch = to_insert_stmts + to_update_stmts + to_deactivate_stmts + price_log_stmts
