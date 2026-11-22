@@ -912,7 +912,8 @@ class InventoryComparator:
             """
             SELECT y.*, b.name as branch_name 
             FROM yungching_houses y
-            LEFT JOIN branches b ON y.branch_id = b.branch_id;
+            LEFT JOIN branches b ON y.branch_id = b.branch_id
+            WHERE y.status IS NULL OR y.status = 'ONLINE';
             """
         )
         yc_inventory_count = len(yc_list)
