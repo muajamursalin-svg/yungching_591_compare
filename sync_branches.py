@@ -59,6 +59,41 @@ class YungchingBranchSyncer:
             """,
             [now_str, now_str]
         )
+        # 確保價格日誌表及樓層欄位存在
+        try:
+            self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS house_price_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_sid INTEGER NOT NULL,
+                    branch_id TEXT NOT NULL,
+                    branch_name TEXT,
+                    case_name TEXT,
+                    county TEXT,
+                    district TEXT,
+                    address TEXT,
+                    community_name TEXT,
+                    reg_area REAL,
+                    from_floor INTEGER,
+                    to_floor INTEGER,
+                    up_floor INTEGER,
+                    cover TEXT,
+                    old_price REAL NOT NULL,
+                    new_price REAL NOT NULL,
+                    price_diff REAL NOT NULL,
+                    percent_change REAL,
+                    changed_at TEXT NOT NULL
+                );
+                """
+            )
+            for col in ["from_floor INTEGER", "to_floor INTEGER", "up_floor INTEGER"]:
+                try:
+                    self.db.execute(f"ALTER TABLE house_price_logs ADD COLUMN {col};")
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[Warn] 初始化 house_price_logs 失敗: {e}")
+
         print(f"🔄 [Sync] 已記錄同步開始時間 @ {now_str} (維持無鎖狀態，允許即時查詢)")
 
     def release_sync_lock(self):
@@ -275,8 +310,9 @@ class YungchingBranchSyncer:
         price_log_sql = """
             INSERT INTO house_price_logs (
                 case_sid, branch_id, branch_name, case_name, county, district, address,
-                community_name, reg_area, cover, old_price, new_price, price_diff, percent_change, changed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                community_name, reg_area, from_floor, to_floor, up_floor, cover,
+                old_price, new_price, price_diff, percent_change, changed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
 
         for h in items:
@@ -392,7 +428,8 @@ class YungchingBranchSyncer:
                         price_log_stmts.append((price_log_sql, [
                             case_sid, branch_id, branch_name, case_name_val,
                             county, district, raw_addr, comm_name_val,
-                            reg_area_val, cover_val, old_price, cur_price,
+                            reg_area_val, from_floor_val, to_floor_val, up_floor_val, cover_val,
+                            old_price, cur_price,
                             p_diff, p_pct, now_str
                         ]))
                 else:

@@ -312,9 +312,10 @@
                 <h3 class="text-xs sm:text-sm font-bold text-slate-900 leading-snug line-clamp-1">
                   {{ house.case_name }}
                 </h3>
-                <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                <div class="text-[11px] text-slate-500 flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
                   <span v-if="house.community_name">🏢 {{ house.community_name }}</span>
                   <span v-if="house.reg_area">📐 {{ house.reg_area }}坪</span>
+                  <span v-if="formatFloor(house.from_floor, house.to_floor, house.up_floor)">🪜 {{ formatFloor(house.from_floor, house.to_floor, house.up_floor) }}</span>
                 </div>
                 <div class="text-[11px] text-slate-400 truncate">
                   📍 {{ house.address }}
@@ -414,9 +415,12 @@
               <h3 class="font-bold text-slate-800 truncate mt-0.5">
                 {{ house.case_name }}
               </h3>
-              <div class="text-[11px] text-slate-500 flex justify-between mt-0.5">
+              <div class="text-[11px] text-slate-500 flex items-center justify-between mt-0.5">
                 <span>下架前開價: <strong class="text-slate-700">{{ house.price }} 萬</strong></span>
-                <span v-if="house.reg_area">{{ house.reg_area }} 坪</span>
+                <div class="flex items-center gap-1.5">
+                  <span v-if="house.reg_area">{{ house.reg_area }} 坪</span>
+                  <span v-if="formatFloor(house.from_floor, house.to_floor, house.up_floor)" class="text-slate-400">• {{ formatFloor(house.from_floor, house.to_floor, house.up_floor) }}</span>
+                </div>
               </div>
               <div class="text-[10px] text-slate-400 mt-0.5">
                 🕒 下架時間: {{ house.offline_at || '本週' }}
@@ -506,6 +510,30 @@
           return url;
         }
 
+        function formatFloor(fromFloor, toFloor, upFloor) {
+          const from = (fromFloor !== null && fromFloor !== undefined && fromFloor !== '') ? parseInt(fromFloor) : null;
+          const to = (toFloor !== null && toFloor !== undefined && toFloor !== '') ? parseInt(toFloor) : null;
+          const up = (upFloor !== null && upFloor !== undefined && upFloor !== '') ? parseInt(upFloor) : null;
+
+          if (from === null && up === null) return '';
+
+          let floorStr = '';
+          if (from !== null) {
+            const fromLabel = from < 0 ? `B${Math.abs(from)}` : `${from}`;
+            if (to !== null && to !== from) {
+              const toLabel = to < 0 ? `B${Math.abs(to)}` : `${to}`;
+              floorStr = `${fromLabel}~${toLabel}樓`;
+            } else {
+              floorStr = `${fromLabel}樓`;
+            }
+          }
+
+          if (up !== null && up > 0) {
+            floorStr = floorStr ? `${floorStr}/${up}樓` : `共${up}樓`;
+          }
+          return floorStr;
+        }
+
         function getMondayThisWeek() {
           const d = new Date();
           const day = d.getDay();
@@ -550,6 +578,9 @@
                   address: log.address || '',
                   community_name: log.community_name || '',
                   reg_area: log.reg_area || 0,
+                  from_floor: log.from_floor,
+                  to_floor: log.to_floor,
+                  up_floor: log.up_floor,
                   cover: log.cover || '',
                   first_price: log.old_price,
                   latest_price: log.new_price,
@@ -569,6 +600,9 @@
               } else {
                 groupMap[sid].latest_price = log.new_price;
                 groupMap[sid].last_changed_at = log.changed_at;
+                if (log.from_floor != null) groupMap[sid].from_floor = log.from_floor;
+                if (log.to_floor != null) groupMap[sid].to_floor = log.to_floor;
+                if (log.up_floor != null) groupMap[sid].up_floor = log.up_floor;
                 groupMap[sid].history.push({
                   time: log.changed_at,
                   from_price: log.old_price,
@@ -1112,6 +1146,7 @@
           priceChangedHouses,
           weeklyOfflineHouses,
           formatYcCover,
+          formatFloor,
           weekRangeText,
           loadInventoryTrends,
           switchToTrends
