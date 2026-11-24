@@ -8,6 +8,7 @@ import ssl
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
+from address_utils import normalize_road_name, normalize_taiwan_address
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -235,7 +236,7 @@ class T591ShopCrawler:
                 h.get("layout") or "",
                 h.get("regionname") or "",
                 h.get("sectionname") or "",
-                h.get("street_name") or "",
+                normalize_road_name(h.get("street_name") or ""),
                 re.sub(r'<[^>]+>', '', h.get("cases_name") or "").strip(),
                 h.get("kind_name") or "",
                 shape,
@@ -281,16 +282,16 @@ class T591ShopCrawler:
             area_val = g_area if (is_land and g_area > 0) else reg_area_val
             case_type_val = "土地" if is_land else (kind or ("透天/別墅" if shape in [3, 4] else "大樓/華廈"))
 
-            st_name = (h.get("street_name") or "").strip()
+            st_name = normalize_road_name((h.get("street_name") or "").strip())
             if is_land and not (st_name and "段" in st_name):
                 sec = T591ShopCrawler.fetch_land_section(hid)
                 if sec:
-                    st_name = sec
+                    st_name = normalize_road_name(sec)
 
             std_item = {
                 "platform": "591",
                 "house_id": hid,
-                "title": h.get("fulladdress") or h.get("address") or "",
+                "title": normalize_taiwan_address(h.get("fulladdress") or h.get("address") or ""),
                 "url": f"https://sale.591.com.tw/sale-detail-{hid}.html",
                 "county": (h.get("regionname") or "").strip(),
                 "district": (h.get("sectionname") or "").strip(),

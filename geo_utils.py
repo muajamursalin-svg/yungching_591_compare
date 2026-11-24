@@ -1,6 +1,7 @@
 import math
 import re
 from typing import Optional, Tuple
+from address_utils import normalize_road_name
 
 # 地球半徑 (公尺)
 EARTH_RADIUS = 6371000.0
@@ -163,9 +164,10 @@ TAICHUNG_ROADS = {
 }
 
 def extract_pure_road(addr: str) -> str:
-    """從地址中提取純路/街名 (去除巷弄號等)"""
+    """從地址中提取純路/街名 (去除巷弄號等)，並統一標準化段別與字元"""
     if not addr:
         return ""
+    addr = normalize_road_name(addr)
     # 去除縣市、行政區字眼
     addr = re.sub(r'^.*?([縣市])', '', addr)
     addr = re.sub(r'^.*?([區鄉鎮市])', '', addr)

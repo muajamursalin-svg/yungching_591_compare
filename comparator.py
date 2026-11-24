@@ -11,7 +11,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from turso_client import TursoClient
-from geo_utils import is_road_too_far
+from geo_utils import is_road_too_far, extract_pure_road
+from address_utils import normalize_road_name, normalize_taiwan_address
 
 # 統一使用台灣時區 (UTC+8)
 TAIWAN_TZ = timezone(timedelta(hours=8))
@@ -39,7 +40,7 @@ def extract_section_name(text: str) -> str:
     """
     if not text:
         return ""
-    s = text.replace('臺', '台').strip()
+    s = normalize_road_name(text).strip()
     s = re.sub(r'^(.*?([縣市]))?(.*?([區鄉鎮市]))?', '', s)
     m = re.search(r'([\u4e00-\u9fa50-9一二三四五六七八九十]+段)', s)
     if m:
@@ -64,7 +65,7 @@ def generate_property_fingerprint(
     """
     c = clean_text(str(county or "")).replace('臺', '台')
     d = clean_text(str(district or "")).replace('臺', '台')
-    s = clean_text(str(street or "")).replace('臺', '台')
+    s = normalize_road_name(clean_text(str(street or "")))
 
     try:
         p = f"{float(price or 0.0):.1f}M"
@@ -186,7 +187,7 @@ class InventoryComparator:
         p1 = float(h.get("price") or 0.0)
         allf1 = int(h.get("all_floor") or 0)
         age1 = float(h.get("house_age") or 0.0)
-        st1 = (h.get("street") or "").strip()
+        st1 = normalize_road_name((h.get("street") or "").strip())
         comm1 = clean_text(h.get("community_name") or "")
         t1 = clean_text(h.get("title") or "")
 
@@ -354,11 +355,20 @@ class InventoryComparator:
                 elif comm2 and comm2 in t1:
                     comm_match = True
 
-                # 路名吻合度檢查 (統一 臺/台)
-                st1_norm = st1.replace('臺', '台')
-                addr2_norm = addr2.replace('臺', '台')
-                case2_norm = case2.replace('臺', '台')
-                st_match = bool(st1 and (st1_norm in addr2_norm or st1_norm in case2_norm))
+                # 路名吻合度檢查 (統一 臺/台 與 段別數字正規化)
+                st1_norm = normalize_road_name(st1)
+                addr2_norm = normalize_taiwan_address(addr2)
+                case2_norm = normalize_road_name(case2)
+                pure_st1 = extract_pure_road(st1_norm)
+                pure_addr2 = extract_pure_road(addr2_norm)
+                st_match = bool(
+                    st1 and (
+                        st1_norm in addr2_norm or 
+                        st1_norm in case2_norm or 
+                        (pure_st1 and pure_addr2 and pure_st1 == pure_addr2) or
+                        (pure_st1 and len(pure_st1) >= 3 and pure_st1 in addr2_norm)
+                    )
+                )
 
                 # 行政區檢查 (同縣市跨區放寬)：
                 # 若同縣市但行政區不同，若社區完全吻合 或 (路名吻合且兩路段未相距過遠)，放寬行政區判定 (如台中市中平路跨北屯/西屯交界)
@@ -485,13 +495,21 @@ class InventoryComparator:
                     else:
                         # 2. 核心特徵比對 (縣市、路名/社區/區域、樓層)
                         it_c = clean_text(item.get("county") or "").replace('臺', '台')
-                        it_s = clean_text(item.get("street") or "").replace('臺', '台')
+                        it_s = normalize_road_name(clean_text(item.get("street") or ""))
                         it_d = clean_text(item.get("district") or "").replace('臺', '台')
                         c1_n = c1.replace('臺', '台')
-                        st1_n = st1.replace('臺', '台')
+                        st1_n = normalize_road_name(st1)
 
                         if it_c == c1_n:
-                            st_match_int = bool(st1_n and (st1_n in it_s or it_s in st1_n))
+                            pure_it_s = extract_pure_road(it_s)
+                            pure_st1_n = extract_pure_road(st1_n)
+                            st_match_int = bool(
+                                st1_n and (
+                                    st1_n in it_s or 
+                                    it_s in st1_n or 
+                                    (pure_it_s and pure_st1_n and pure_it_s == pure_st1_n)
+                                )
+                            )
                             comm_match_int = bool(comm1 and item.get("case_name") and (comm1 in clean_text(item.get("case_name")) or clean_text(item.get("case_name")) in comm1))
                             dist_match_int = bool(d1 and it_d and d1 == it_d)
 
@@ -565,8 +583,12 @@ class InventoryComparator:
 
             case2 = clean_text(y.get("case_name") or "")
             addr2 = (y.get("address") or "").strip()
-            st1_norm = st1.replace('臺', '台')
-            if st1 and (st1_norm in addr2.replace('臺', '台') or st1_norm in case2):
+            st1_norm = normalize_road_name(st1)
+            addr2_norm = normalize_taiwan_address(addr2)
+            case2_norm = normalize_road_name(case2)
+            pure_st1 = extract_pure_road(st1_norm)
+            pure_addr2 = extract_pure_road(addr2_norm)
+            if st1 and (st1_norm in addr2_norm or st1_norm in case2_norm or (pure_st1 and pure_addr2 and pure_st1 == pure_addr2)):
                 score += 20.0
 
             # 樓層完全一致者額外加分 (區間僅交集重疊者保留機會但不加滿分)
@@ -652,7 +674,12 @@ class InventoryComparator:
                 if not c_match:
                     continue
             else:
-                s_match = bool(st1 and (st1.replace('臺', '台') in y_addr2 or st1.replace('臺', '台') in y_case2))
+                st1_norm = normalize_road_name(st1)
+                y_addr2_norm = normalize_taiwan_address(y_addr2)
+                y_case2_norm = normalize_road_name(y_case2)
+                pure_st1 = extract_pure_road(st1_norm)
+                pure_y_addr = extract_pure_road(y_addr2_norm)
+                s_match = bool(st1 and (st1_norm in y_addr2_norm or st1_norm in y_case2_norm or (pure_st1 and pure_y_addr and pure_st1 == pure_y_addr)))
                 if not s_match:
                     continue
 
@@ -705,12 +732,22 @@ class InventoryComparator:
             has_age_diff = True
             anomalies.append(f"屋齡出入：{platform_name} 標 {age1}年 vs 永慶標 {age2}年 (疑似屋齡填寫有誤)")
 
-        # 路名判斷 (統一 臺/台)
+        # 路名判斷 (統一 臺/台 與 段別數字正規化)
         has_street_diff = False
-        st1_norm = st1.replace('臺', '台')
-        addr2_norm = addr2.replace('臺', '台')
-        case2_norm = case2.replace('臺', '台')
-        if st1 and (st1_norm not in addr2_norm and st1_norm not in case2_norm):
+        st1_norm = normalize_road_name(st1)
+        addr2_norm = normalize_taiwan_address(addr2)
+        case2_norm = normalize_road_name(case2)
+        pure_st1 = extract_pure_road(st1_norm)
+        pure_addr2 = extract_pure_road(addr2_norm)
+        st_matches = bool(
+            st1 and (
+                st1_norm in addr2_norm or 
+                st1_norm in case2_norm or 
+                (pure_st1 and pure_addr2 and pure_st1 == pure_addr2) or
+                (pure_st1 and len(pure_st1) >= 3 and pure_st1 in addr2_norm)
+            )
+        )
+        if st1 and not st_matches:
             has_street_diff = True
             anomalies.append(f"路名出入：{platform_name} 標「{st1}」 vs 永慶地址「{addr2}」")
 

@@ -5,6 +5,7 @@ import time
 import requests
 from datetime import datetime, timezone, timedelta
 from turso_client import TursoClient
+from address_utils import normalize_taiwan_address
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -155,18 +156,31 @@ class YungchingBranchSyncer:
                 "pinType": 0,
                 "isAddRoom": "true"
             }
-            res = requests.get(url, params=params, headers=self.HEADERS, timeout=15)
-            res.raise_for_status()
-            data = res.json().get("data", {})
-            items = data.get("list", [])
-            pa = data.get("pa", {})
-            total_pages = pa.get("totalPageCount", 1)
+            items = []
+            total_pages = 1
+            total_item_count = 0
+            for attempt in range(1, 4):
+                try:
+                    res = requests.get(url, params=params, headers=self.HEADERS, timeout=15)
+                    res.raise_for_status()
+                    data = res.json().get("data", {})
+                    items = data.get("list", [])
+                    pa = data.get("pa", {})
+                    total_pages = pa.get("totalPageCount", 1)
+                    total_item_count = pa.get("totalItemCount", 0)
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        print(f"  [分店 {branch_id}] 第 {page} 頁拉取逾時/失敗 ({e})，進行第 {attempt+1} 次重試...")
+                        time.sleep(1.5)
+                    else:
+                        print(f"  [分店 {branch_id}] 第 {page} 頁重試 3 次皆失敗 ({e})，跳過此頁。")
 
             if not items:
                 break
 
             all_houses.extend(items)
-            print(f"  [分店 {branch_id}] 第 {page}/{total_pages} 頁，累積拉取 {len(all_houses)}/{pa.get('totalItemCount', 0)} 筆")
+            print(f"  [分店 {branch_id}] 第 {page}/{total_pages} 頁，累積拉取 {len(all_houses)}/{total_item_count} 筆")
 
             if page >= total_pages:
                 break
@@ -180,7 +194,7 @@ class YungchingBranchSyncer:
         二階段官網終極核實 (Double-Check)：
         直接查詢 https://buy.yungching.com.tw/house/{case_sid}
         回傳 True 表示真下架 (404 或 頁面包含結案/下架提示)；
-        回傳 False 表示假警報 (網頁存在且正常在售，維持 ONLINE)
+        回傳 False 表示假警報 (網頁存在且正常在售，或非 404 狀態/連線異常，維持 ONLINE)
         """
         url = f"https://buy.yungching.com.tw/house/{case_sid}"
         headers = {
@@ -188,15 +202,18 @@ class YungchingBranchSyncer:
             "Referer": "https://buy.yungching.com.tw/",
         }
         try:
-            res = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+            res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
             if res.status_code == 404:
                 return True
             text = res.text
-            if "此物件已結案" in text or "此物件已下架" in text or "此物件已售出" in text or "找不到此物件" in text:
+            offline_keywords = ["此物件已結案", "此物件已下架", "此物件已售出", "找不到此物件", "物件已下架", "物件不存在"]
+            if any(kw in text for kw in offline_keywords):
                 return True
             if res.status_code == 200:
                 return False
-            return True
+            # 若為 403 / 429 / 500 等其他非 200 且非 404 的狀態碼，保守起見不判定為下架
+            print(f"    [Warn] 二次核實物件 {case_sid} 回傳狀態碼 ({res.status_code})，保守起見暫不判定下架")
+            return False
         except Exception as e:
             print(f"    [Warn] 二次核實物件 {case_sid} 連線失敗 ({e})，安全起見暫不判定下架")
             return False
@@ -319,7 +336,7 @@ class YungchingBranchSyncer:
             case_sid = int(h.get("caseSId"))
             incoming_sids.add(case_sid)
 
-            raw_addr = (h.get("address") or "").strip()
+            raw_addr = normalize_taiwan_address((h.get("address") or "").strip())
             county, district, _ = parse_taiwan_address(raw_addr)
 
             pin = h.get("pinInfo") or {}

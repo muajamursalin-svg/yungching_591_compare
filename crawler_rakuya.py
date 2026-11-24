@@ -12,6 +12,7 @@ from curl_cffi import requests
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
+from address_utils import normalize_road_name
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -142,6 +143,7 @@ class RakuyaShopCrawler:
             addr_m = re.search(r'class="obj-address">([^<]+)</p>', raw_item)
             raw_addr = addr_m.group(1).strip() if addr_m else ""
             county, district, street = parse_taiwan_address(raw_addr)
+            street = normalize_road_name(street)
 
             price_m = re.search(r'class="obj-price">\s*<span>\s*([\d\.,]+)萬', raw_item)
             price = float(price_m.group(1).replace(",", "")) if price_m else 0.0

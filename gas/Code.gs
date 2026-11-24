@@ -132,16 +132,17 @@ function doPost(e) {
         const shopId = params.shop_id || "";
 
         if (action === "update_shop") {
-          // 檢查使用者當前是否已有比對任務執行中 (防止重複併發查詢)
+          // 檢查使用者當前是否已有「其他」比對任務執行中 (防止重複併發查詢)
           const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
-          if (userLock && userLock.is_locked) {
+          const isSamePendingLock = (userLock && userLock.is_locked && userLock.platform === platform && userLock.shop_id === shopId);
+          if (userLock && userLock.is_locked && !isSamePendingLock) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
             const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
             const qr = buildQuickReply(userShops);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              `系統正為您處理【${platName}】店鋪比對（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
               qr
             );
             continue;
@@ -172,16 +173,17 @@ function doPost(e) {
           continue;
 
         } else if (action === "once_compare") {
-          // 檢查使用者當前是否已有比對任務執行中
+          // 檢查使用者當前是否已有「其他」比對任務執行中
           const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
-          if (userLock && userLock.is_locked) {
+          const isSamePendingLock = (userLock && userLock.is_locked && userLock.platform === platform && userLock.shop_id === shopId);
+          if (userLock && userLock.is_locked && !isSamePendingLock) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
             const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
             const qr = buildQuickReply(userShops);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              `系統正為您處理【${platName}】店鋪比對（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
               qr
             );
             continue;
@@ -204,6 +206,16 @@ function doPost(e) {
             `📍 ${platform} 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
             `⏳ 系統現正進行庫存比對，完成後將推播報告通知您！`,
+            qr
+          );
+          continue;
+
+        } else if (action === "cancel_compare") {
+          releaseUserQueryLock(tursoUrl, tursoToken, userId);
+          const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+          const qr = buildQuickReply(userShops);
+          replyLineMessage(lineToken, replyToken,
+            `❎ 已為您取消本次店鋪比對查詢。`,
             qr
           );
           continue;
@@ -254,8 +266,9 @@ function doPost(e) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              `系統正為您處理【${platName}】店鋪比對。\n\n` +
+              `若上方有出現確認卡片，請先點選【更新預設】或【單次比對】（或點取消）。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
               qr
             );
             continue;
@@ -271,8 +284,8 @@ function doPost(e) {
             continue;
           }
 
-          // 檢查 1 分鐘快取
-          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
+          // 檢查 1 分鐘快取 (依平台與店鋪隔離)
+          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, reqPlatform, 60);
           if (cachedReport) {
             const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
             const summaryText = formatCompareSummaryText(
@@ -350,8 +363,9 @@ function doPost(e) {
             const qr = buildQuickReply(userShops);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您比對【${platName}】店鋪庫存（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成後再進行下次查詢。`,
+              `系統正為您處理【${platName}】店鋪比對。\n\n` +
+              `若上方有出現確認卡片，請先點選【更新預設】或【單次比對】（或點取消）。\n\n` +
+              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
               qr
             );
             continue;
@@ -365,6 +379,9 @@ function doPost(e) {
 
           // ── 情境 C：使用者已存有網址，但這次輸入了不同網址 ──
           if (savedUrl && !isSameUrl(savedUrl, userMsg, platform)) {
+            // 🚨 做法 B：立即掛起待確認鎖定，防止其他平台插隊
+            acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
+
             const confirmQuickReply = {
               items: [
                 {
@@ -388,9 +405,10 @@ function doPost(e) {
                 {
                   type: "action",
                   action: {
-                    type: "message",
+                    type: "postback",
                     label: "❌ 取消",
-                    text: "取消查詢"
+                    data: "action=cancel_compare",
+                    displayText: "取消查詢"
                   }
                 }
               ]
@@ -400,7 +418,8 @@ function doPost(e) {
               `⚠️ 偵測到您輸入了新的 ${platform} 店鋪網址！\n\n` +
               `📌 原預設網址：\n${savedUrl}\n\n` +
               `🆕 新輸入網址：\n${userMsg}\n\n` +
-              `請問是否要將未來的快捷查詢更新以此新網址為主？`,
+              `請問是否要將未來的快捷查詢更新以此新網址為主？\n\n` +
+              `（系統已暫時鎖定本次查詢，請直接點選下方選項）`,
               confirmQuickReply
             );
             continue;
@@ -425,8 +444,8 @@ function doPost(e) {
             continue;
           }
 
-          // 檢查 1 分鐘內快取
-          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, 60);
+          // 檢查 1 分鐘內快取 (依平台與店鋪隔離)
+          const cachedReport = checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, platform, 60);
           if (cachedReport) {
             const targetLiff = liffUrl ? `${liffUrl}?report_id=${cachedReport.report_id}` : "";
             const summaryText = formatCompareSummaryText(
@@ -844,21 +863,27 @@ function checkBranchSyncLock(tursoUrl, tursoToken) {
 }
 
 /**
- * 直接透過 Turso HTTP API 查詢 1 分鐘內的既有比對報告
+ * 直接透過 Turso HTTP API 查詢 1 分鐘內的既有比對報告 (支援依平台與店鋪隔離)
  */
-function checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, maxSeconds) {
+function checkRecentCacheFromTurso(tursoUrl, tursoToken, shopId, platform, maxSeconds) {
   if (!tursoUrl || !tursoToken) return null;
 
   try {
     const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
-    const sql = "SELECT * FROM compare_reports WHERE shop_id = ? ORDER BY created_at DESC LIMIT 1;";
+    const sql = platform ? 
+      "SELECT * FROM compare_reports WHERE shop_id = ? AND platform = ? ORDER BY created_at DESC LIMIT 1;" :
+      "SELECT * FROM compare_reports WHERE shop_id = ? ORDER BY created_at DESC LIMIT 1;";
+    const args = platform ? 
+      [{ type: "text", value: shopId.toString() }, { type: "text", value: platform.toString() }] :
+      [{ type: "text", value: shopId.toString() }];
+
     const payload = {
       requests: [
         {
           type: "execute",
           stmt: {
             sql: sql,
-            args: [{ type: "text", value: shopId.toString() }]
+            args: args
           }
         },
         { type: "close" }

@@ -17,6 +17,7 @@ except ImportError:
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from turso_client import TursoClient
+from address_utils import normalize_road_name, normalize_taiwan_address
 
 TAIWAN_TZ = timezone(timedelta(hours=8))
 
@@ -118,7 +119,83 @@ class HousePrice5168Crawler:
                 break
 
         print(f"[OK] 5168 抓取完成！共收集 {len(all_raw_cases)} 筆原始在庫物件 (預期 {total_items} 筆)")
+        
+        # 雙渠道降級備援：若底層 API 取得 0 筆 (例如受海外 IP / 防火牆阻擋)，自動切換至 Nuxt 3 SSR 頁面備援
+        if not all_raw_cases:
+            print("[*] 5168 底層 API 未取得資料，自動啟動 Nuxt 3 SSR 雙渠道備援...")
+            all_raw_cases = self.fetch_cases_from_ssr_nuxt(account, account_type)
+
         return all_raw_cases
+
+    def fetch_cases_from_ssr_nuxt(self, account: str, account_type: str = "agent") -> List[Dict[str, Any]]:
+        """
+        雙渠道降級備援 (Solution A)：
+        當 buy.houseprice.tw 底層 API 遭雲端機房/海外 IP 限制阻擋時，
+        直接存取前端 Nuxt 3 SSR 頁面 (https://realtor.houseprice.tw/{type}/buy/{account}/)，
+        解析 HTML 中的 __NUXT_DATA__ 結構化資料，提取在售物件清單。
+        """
+        ssr_url = f"https://realtor.houseprice.tw/{account_type}/buy/{account}/"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        try:
+            print(f"[*] [5168 SSR] 嘗試從前端 Nuxt SSR ({ssr_url}) 提取資料...")
+            resp = self.session.get(ssr_url, headers=headers, timeout=self.timeout)
+            if resp.status_code != 200:
+                print(f"[!] 5168 SSR 頁面請求失敗 (HTTP {resp.status_code})")
+                return []
+
+            m = re.search(r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>(.*?)</script>', resp.text, re.DOTALL)
+            if not m:
+                print(f"[!] 5168 SSR 頁面中未找到 __NUXT_DATA__ 標籤")
+                return []
+
+            data = json.loads(m.group(1).strip())
+
+            def parse_node(idx, visited=None):
+                if visited is None:
+                    visited = set()
+                if idx is None or not (0 <= idx < len(data)):
+                    return idx
+                if idx in visited:
+                    return None
+                visited.add(idx)
+                raw = data[idx]
+                if isinstance(raw, (str, float, bool)) or raw is None:
+                    return raw
+                elif isinstance(raw, int):
+                    return raw
+                elif isinstance(raw, list):
+                    return [parse_node(child_idx, visited.copy()) for child_idx in raw]
+                elif isinstance(raw, dict):
+                    res_dict = {}
+                    for k, v_idx in raw.items():
+                        if isinstance(v_idx, int) and 0 <= v_idx < len(data):
+                            res_dict[k] = parse_node(v_idx, visited.copy())
+                        else:
+                            res_dict[k] = v_idx
+                    return res_dict
+                return raw
+
+            cases = []
+            for item in data:
+                if isinstance(item, dict) and "caseInfo" in item:
+                    case_info_idx = item["caseInfo"]
+                    if isinstance(case_info_idx, int) and 0 <= case_info_idx < len(data):
+                        case_list_raw = data[case_info_idx]
+                        if isinstance(case_list_raw, list):
+                            for c_idx in case_list_raw:
+                                c_parsed = parse_node(c_idx)
+                                if isinstance(c_parsed, dict) and "sid" in c_parsed:
+                                    cases.append(c_parsed)
+                    break
+
+            print(f"✅ [5168 SSR] 成功從 Nuxt SSR 備援渠道提取 {len(cases)} 筆在售物件！")
+            return cases
+        except Exception as e:
+            print(f"[!] 5168 SSR 備援解析異常: {e}")
+            return []
 
     def save_to_turso(self, account: str, account_type: str, raw_cases: List[Dict[str, Any]]):
         """將原始 5168 案件保存至 t5168_shops 與 t5168_houses 快照表"""
@@ -204,7 +281,7 @@ class HousePrice5168Crawler:
                 int(c.get("rm") or 0),
                 c.get("city") or "",
                 c.get("district") or "",
-                c.get("road") or "",
+                normalize_road_name(c.get("road") or ""),
                 comm.get("communityName") or "",
                 c.get("purposeName") or "",
                 case_type,
@@ -257,7 +334,7 @@ class HousePrice5168Crawler:
                 "url": c.get("caseUrl") or f"https://buy.houseprice.tw/house/{hid}/",
                 "county": (c.get("city") or "").strip(),
                 "district": (c.get("district") or "").strip(),
-                "street": (c.get("road") or "").strip(),
+                "street": normalize_road_name((c.get("road") or "").strip()),
                 "community_name": (comm.get("communityName") or "").strip(),
                 "price": float(c.get("totalPrice") or 0.0),
                 "reg_area": pin_val,

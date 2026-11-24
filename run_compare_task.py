@@ -15,12 +15,19 @@ from crawler_rakuya import RakuyaShopCrawler
 from comparator import InventoryComparator
 from turso_client import TursoClient
 
+import re
+
 def detect_platform(input_str: str) -> str:
-    s = input_str.lower()
+    s = input_str.lower().strip()
     if "houseprice.tw" in s or "5168" in s:
         return "5168"
     if "rakuya.com.tw" in s or "rakuya" in s:
         return "rakuya"
+    # 若為台灣手機號碼 (例如 0963468222)，優先辨識為 5168 經紀人個人店鋪
+    if re.match(r'^09\d{8}$', s):
+        return "5168"
+    if "broker" in s or re.match(r'^\d{4,6}$', s):
+        return "591"
     return "591"
 
 def build_interactive_message(db_client: Optional[TursoClient], user_id: str, message: str, liff_url: str = "") -> dict:
