@@ -248,29 +248,43 @@
 
     <!-- 分店庫存動態視角 (價格變化軌跡 + 本週下架) -->
     <main v-if="mainView === 'trends'" class="p-4 space-y-4">
-      <!-- 統計圖卡 -->
+      <!-- 統計圖卡 (點選切換檢視) -->
       <div class="grid grid-cols-2 gap-2">
-        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+        <button 
+          @click="trendsTab = 'price'"
+          :class="trendsTab === 'price' 
+            ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-300/40 shadow-sm' 
+            : 'bg-white border-slate-200 hover:bg-slate-50 opacity-75 hover:opacity-100'"
+          class="p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
+        >
           <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
             <span>🔥</span> 價格異動物件
           </div>
           <div class="text-xl font-bold text-amber-600 mt-0.5">
             {{ priceChangedHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
           </div>
-        </div>
+          <div v-if="trendsTab === 'price'" class="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-b-xl"></div>
+        </button>
 
-        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+        <button 
+          @click="trendsTab = 'offline'"
+          :class="trendsTab === 'offline' 
+            ? 'bg-rose-50/80 border-rose-400 ring-2 ring-rose-300/40 shadow-sm' 
+            : 'bg-white border-slate-200 hover:bg-slate-50 opacity-75 hover:opacity-100'"
+          class="p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
+        >
           <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
             <span>📦</span> 本週下架物件
           </div>
           <div class="text-xl font-bold text-slate-700 mt-0.5">
             {{ weeklyOfflineHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
           </div>
-        </div>
+          <div v-if="trendsTab === 'offline'" class="absolute bottom-0 left-0 right-0 h-1 bg-rose-500 rounded-b-xl"></div>
+        </button>
       </div>
 
       <!-- 區塊一：價格異動物件與軌跡 -->
-      <section class="space-y-3">
+      <section v-if="trendsTab === 'price'" class="space-y-3">
         <div class="flex items-center justify-between border-b pb-1.5 border-slate-200">
           <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
             <span>🏷️</span> 分店價格異動物件
@@ -373,8 +387,8 @@
       </section>
 
       <!-- 區塊二：本週下架物件 -->
-      <section class="space-y-3 pt-3 border-t border-slate-200">
-        <div class="flex items-center justify-between">
+      <section v-if="trendsTab === 'offline'" class="space-y-3">
+        <div class="flex items-center justify-between border-b pb-1.5 border-slate-200">
           <div>
             <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
               <span>📦</span> 本週下架物件
@@ -384,9 +398,17 @@
               統計週期：{{ weekRangeText }}（每週一 00:00 自動歸零重新統計）
             </div>
           </div>
+          <button @click="loadInventoryTrends(true)" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
+            <span>🔄</span> 重新整理
+          </button>
         </div>
 
-        <div v-if="weeklyOfflineHouses.length === 0" class="bg-white p-6 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-1">
+        <div v-if="loadingTrends" class="flex flex-col items-center justify-center py-8 text-slate-400">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mb-2"></div>
+          <p class="text-xs">正在載入價格異動與下架紀錄...</p>
+        </div>
+
+        <div v-else-if="weeklyOfflineHouses.length === 0" class="bg-white p-6 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-1">
           <div class="text-xl">✨</div>
           <div class="text-xs font-medium text-slate-600">本週目前尚無下架物件紀錄</div>
           <div class="text-[10px] text-slate-400">當分店庫存物件下架或成交時，將自動列於此區供同仁追蹤</div>
@@ -498,6 +520,7 @@
 
         // 主視角切換 (compare: 比對診斷, trends: 分店庫存變化)
         const mainView = ref('compare');
+        const trendsTab = ref('price'); // 'price': 價格異動, 'offline': 本週下架
         const loadingTrends = ref(false);
         const trendsError = ref(null);
         const priceChangedHouses = ref([]);
@@ -1141,6 +1164,7 @@
           submitReportActive,
           confirmRemoveInternal,
           mainView,
+          trendsTab,
           loadingTrends,
           trendsError,
           priceChangedHouses,
