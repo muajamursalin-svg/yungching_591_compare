@@ -120,6 +120,15 @@ def run_cleanup(retention_days: int = 3, db_client: Optional[TursoClient] = None
         except Exception as e:
             print(f"[Warn] 清理鎖定表失敗: {e}")
 
+        # 5. 清理超過 45 天的舊下架日誌與價格日誌 (維持近一個月以上雙週資料庫充裕查詢)
+        try:
+            log_cutoff = (now - timedelta(days=45)).strftime("%Y-%m-%d %H:%M:%S")
+            db.execute("DELETE FROM house_offline_logs WHERE offline_at < ?;", [log_cutoff])
+            db.execute("DELETE FROM house_price_logs WHERE changed_at < ?;", [log_cutoff])
+            print(f"🗑️ 已清理超過 45 天的歷史下架與價格變更日誌。")
+        except Exception as e:
+            print(f"[Warn] 清理歷史日誌失敗: {e}")
+
         print(f"================ 定期清理任務執行完畢 ================\n")
 
     except Exception as e:

@@ -95,6 +95,38 @@ class YungchingBranchSyncer:
         except Exception as e:
             print(f"[Warn] 初始化 house_price_logs 失敗: {e}")
 
+        # 確保下架歷史日誌表存在
+        try:
+            self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS house_offline_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_sid INTEGER NOT NULL,
+                    branch_id TEXT NOT NULL,
+                    branch_name TEXT,
+                    case_name TEXT,
+                    county TEXT,
+                    district TEXT,
+                    address TEXT,
+                    community_name TEXT,
+                    price REAL,
+                    relisted_price REAL,
+                    reg_area REAL,
+                    from_floor INTEGER,
+                    to_floor INTEGER,
+                    up_floor INTEGER,
+                    cover TEXT,
+                    offline_at TEXT NOT NULL,
+                    relisted_at TEXT,
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_offline_case_sid ON house_offline_logs (case_sid);")
+            self.db.execute("CREATE INDEX IF NOT EXISTS idx_offline_at ON house_offline_logs (offline_at);")
+        except Exception as e:
+            print(f"[Warn] 初始化 house_offline_logs 失敗: {e}")
+
         print(f"🔄 [Sync] 已記錄同步開始時間 @ {now_str} (維持無鎖狀態，允許即時查詢)")
 
     def release_sync_lock(self):
@@ -260,6 +292,8 @@ class YungchingBranchSyncer:
         to_insert_stmts = []
         to_update_stmts = []
         price_log_stmts = []
+        relisted_log_stmts = []
+        offline_log_stmts = []
         incoming_sids = set()
         unchanged_count = 0
 
@@ -330,6 +364,24 @@ class YungchingBranchSyncer:
                 community_name, reg_area, from_floor, to_floor, up_floor, cover,
                 old_price, new_price, price_diff, percent_change, changed_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+
+        relist_log_sql = """
+            UPDATE house_offline_logs 
+            SET relisted_at = ?, relisted_price = ?
+            WHERE case_sid = ? AND relisted_at IS NULL;
+        """
+
+        offline_log_sql = """
+            INSERT INTO house_offline_logs (
+                case_sid, branch_id, branch_name, case_name, county, district, address,
+                community_name, price, relisted_price, reg_area, from_floor, to_floor, up_floor,
+                cover, offline_at, relisted_at, created_at
+            )
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM house_offline_logs WHERE case_sid = ? AND relisted_at IS NULL
+            );
         """
 
         for h in items:
@@ -438,6 +490,10 @@ class YungchingBranchSyncer:
                         now_str, case_sid
                     ]))
 
+                    # 若原為下架狀態，現重新在售 -> 標記下架日誌為重新上架
+                    if (existing.get("status") or "") == "OFFLINE":
+                        relisted_log_stmts.append((relist_log_sql, [now_str, price_val, case_sid]))
+
                     # 若開價有變動 -> 記錄至價格歷史日誌表
                     if old_price > 0 and cur_price > 0 and abs(old_price - cur_price) >= 0.01:
                         p_diff = round(cur_price - old_price, 2)
@@ -465,13 +521,21 @@ class YungchingBranchSyncer:
                     if is_really_offline:
                         print(f"    ❌ 確認已成交結案/下架: {sid}")
                         to_deactivate_stmts.append((deactivate_sql, [now_str, sid]))
+                        offline_log_stmts.append((offline_log_sql, [
+                            sid, branch_id, branch_name, ex.get("case_name") or "",
+                            ex.get("county") or "", ex.get("district") or "", ex.get("address") or "",
+                            ex.get("community_name") or "", ex.get("price") or 0.0,
+                            ex.get("reg_area") or 0.0, ex.get("from_floor"), ex.get("to_floor"), ex.get("up_floor"),
+                            ex.get("cover") or "", now_str, now_str,
+                            sid
+                        ]))
                     else:
                         print(f"    🟢 官網查核仍正常在售 (分頁飄移假警報，維持 ONLINE): {sid}")
 
         # 6. 批次提交變更至 Turso (分段 batch 寫入)
-        all_batch = to_insert_stmts + to_update_stmts + to_deactivate_stmts + price_log_stmts
+        all_batch = to_insert_stmts + to_update_stmts + to_deactivate_stmts + price_log_stmts + relisted_log_stmts + offline_log_stmts
         if all_batch:
-            print(f"  ⚡ [分店 {branch_id}] 執行差分更新：新上架 {len(to_insert_stmts)} 筆，欄位更動 {len(to_update_stmts)} 筆 (其中改價 {len(price_log_stmts)} 筆)，下架 {len(to_deactivate_stmts)} 筆...")
+            print(f"  ⚡ [分店 {branch_id}] 執行差分更新：新上架 {len(to_insert_stmts)} 筆，欄位更動 {len(to_update_stmts)} 筆 (其中改價 {len(price_log_stmts)} 筆, 重新上架 {len(relisted_log_stmts)} 筆)，下架 {len(to_deactivate_stmts)} 筆...")
             chunk_size = 50
             for i in range(0, len(all_batch), chunk_size):
                 self.db.batch(all_batch[i:i + chunk_size])

@@ -44,9 +44,38 @@ CREATE TABLE IF NOT EXISTS yungching_houses (
     is_exclusive INTEGER,   -- 是否專任 (1/0)
     is_discount INTEGER,    -- 是否降價 (1/0)
     tag TEXT,               -- 標籤 JSON
+    status TEXT DEFAULT 'ONLINE', -- 'ONLINE'(在售) / 'OFFLINE'(已下架結案)
+    online_at TEXT,         -- 初次上架時間
+    offline_at TEXT,        -- 最新下架時間
     updated_at TEXT,
     FOREIGN KEY(branch_id) REFERENCES branches(branch_id)
 );
+
+-- 分店歷史下架紀錄表 (保留雙週以上歷史，支援下架後重新在售狀態追蹤)
+CREATE TABLE IF NOT EXISTS house_offline_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_sid INTEGER NOT NULL,
+    branch_id TEXT NOT NULL,
+    branch_name TEXT,
+    case_name TEXT,
+    county TEXT,
+    district TEXT,
+    address TEXT,
+    community_name TEXT,
+    price REAL,             -- 下架前開價
+    relisted_price REAL,    -- 重新上架時在售開價 (若有重新上架)
+    reg_area REAL,
+    from_floor INTEGER,
+    to_floor INTEGER,
+    up_floor INTEGER,
+    cover TEXT,
+    offline_at TEXT NOT NULL, -- 下架時間
+    relisted_at TEXT,         -- 重新上架時間 (未上架為 NULL)
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_offline_case_sid ON house_offline_logs (case_sid);
+CREATE INDEX IF NOT EXISTS idx_offline_at ON house_offline_logs (offline_at);
 
 -- 索引優化：加速以縣市、行政區、社區、坪數進行比對查詢
 CREATE INDEX IF NOT EXISTS idx_yc_search ON yungching_houses (county, district, community_name, reg_area);

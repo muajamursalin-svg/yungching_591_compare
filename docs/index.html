@@ -246,40 +246,56 @@
       </div>
     </main>
 
-    <!-- 分店庫存動態視角 (價格變化軌跡 + 本週下架) -->
+    <!-- 分店庫存動態視角 (價格變化軌跡 + 雙週下架紀錄) -->
     <main v-if="mainView === 'trends'" class="p-4 space-y-4">
-      <!-- 統計圖卡 (點選切換檢視) -->
-      <div class="grid grid-cols-2 gap-2">
+      <!-- 統計圖卡 (點選切換檢視：價格異動 / 本週下架 / 上週下架) -->
+      <div class="grid grid-cols-3 gap-1.5 sm:gap-2">
         <button 
           @click="trendsTab = 'price'"
           :class="trendsTab === 'price' 
             ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-300/40 shadow-sm' 
             : 'bg-white border-slate-200 hover:bg-slate-50 opacity-75 hover:opacity-100'"
-          class="p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
+          class="p-2 sm:p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
         >
-          <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
-            <span>🔥</span> 價格異動物件
+          <div class="text-[11px] sm:text-xs text-slate-500 font-medium flex items-center justify-center gap-0.5 truncate">
+            <span>🔥</span> 價格異動
           </div>
-          <div class="text-xl font-bold text-amber-600 mt-0.5">
-            {{ priceChangedHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
+          <div class="text-base sm:text-xl font-bold text-amber-600 mt-0.5">
+            {{ priceChangedHouses.length }} <span class="text-[10px] sm:text-xs font-normal text-slate-400">件</span>
           </div>
           <div v-if="trendsTab === 'price'" class="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-b-xl"></div>
         </button>
 
         <button 
-          @click="trendsTab = 'offline'"
-          :class="trendsTab === 'offline' 
+          @click="trendsTab = 'this_week_offline'"
+          :class="trendsTab === 'this_week_offline' 
             ? 'bg-rose-50/80 border-rose-400 ring-2 ring-rose-300/40 shadow-sm' 
             : 'bg-white border-slate-200 hover:bg-slate-50 opacity-75 hover:opacity-100'"
-          class="p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
+          class="p-2 sm:p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
         >
-          <div class="text-xs text-slate-500 font-medium flex items-center justify-center gap-1">
-            <span>📦</span> 本週下架物件
+          <div class="text-[11px] sm:text-xs text-slate-500 font-medium flex items-center justify-center gap-0.5 truncate">
+            <span>📦</span> 本週下架
           </div>
-          <div class="text-xl font-bold text-slate-700 mt-0.5">
-            {{ weeklyOfflineHouses.length }} <span class="text-xs font-normal text-slate-400">件</span>
+          <div class="text-base sm:text-xl font-bold text-slate-700 mt-0.5">
+            {{ weeklyOfflineHouses.length }} <span class="text-[10px] sm:text-xs font-normal text-slate-400">件</span>
           </div>
-          <div v-if="trendsTab === 'offline'" class="absolute bottom-0 left-0 right-0 h-1 bg-rose-500 rounded-b-xl"></div>
+          <div v-if="trendsTab === 'this_week_offline'" class="absolute bottom-0 left-0 right-0 h-1 bg-rose-500 rounded-b-xl"></div>
+        </button>
+
+        <button 
+          @click="trendsTab = 'last_week_offline'"
+          :class="trendsTab === 'last_week_offline' 
+            ? 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-300/40 shadow-sm' 
+            : 'bg-white border-slate-200 hover:bg-slate-50 opacity-75 hover:opacity-100'"
+          class="p-2 sm:p-3 rounded-xl border text-center transition-all cursor-pointer relative overflow-hidden active:scale-[0.98]"
+        >
+          <div class="text-[11px] sm:text-xs text-slate-500 font-medium flex items-center justify-center gap-0.5 truncate">
+            <span>📁</span> 上週下架
+          </div>
+          <div class="text-base sm:text-xl font-bold text-slate-700 mt-0.5">
+            {{ lastWeeklyOfflineHouses.length }} <span class="text-[10px] sm:text-xs font-normal text-slate-400">件</span>
+          </div>
+          <div v-if="trendsTab === 'last_week_offline'" class="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500 rounded-b-xl"></div>
         </button>
       </div>
 
@@ -387,7 +403,7 @@
       </section>
 
       <!-- 區塊二：本週下架物件 -->
-      <section v-if="trendsTab === 'offline'" class="space-y-3">
+      <section v-if="trendsTab === 'this_week_offline'" class="space-y-3">
         <div class="flex items-center justify-between border-b pb-1.5 border-slate-200">
           <div>
             <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
@@ -395,7 +411,7 @@
               <span class="text-[11px] font-normal text-slate-500">({{ weeklyOfflineHouses.length }} 件)</span>
             </h2>
             <div class="text-[10px] text-slate-400 mt-0.5">
-              統計週期：{{ weekRangeText }}（每週一 00:00 自動歸零重新統計）
+              統計週期：{{ thisWeekRangeText }}（每週一 00:00 自動歸零重新統計）
             </div>
           </div>
           <button @click="loadInventoryTrends(true)" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
@@ -417,35 +433,153 @@
         <div v-else class="space-y-2.5">
           <div 
             v-for="house in weeklyOfflineHouses" 
-            :key="house.case_sid" 
-            class="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex gap-3 items-center opacity-85 hover:opacity-100 transition"
+            :key="house.id || house.case_sid" 
+            class="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex gap-3 items-center hover:border-slate-300 transition"
           >
             <img 
               :src="formatYcCover(house.cover)" 
-              class="w-16 h-14 object-cover rounded-lg bg-slate-100 flex-shrink-0 grayscale"
-              alt="下架照片"
+              :class="house.relisted_at ? '' : 'grayscale opacity-75'"
+              class="w-16 h-14 object-cover rounded-lg bg-slate-100 flex-shrink-0 transition-all"
+              alt="物件照片"
             >
             <div class="flex-1 min-w-0 text-xs">
               <div class="flex items-center justify-between">
                 <span class="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                   {{ house.branch_name || '永慶分店' }}
                 </span>
-                <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                <!-- 重新上架 / 已下架標籤 -->
+                <span 
+                  v-if="house.relisted_at"
+                  class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                >
+                  <span>🟢</span> 已重新上架
+                </span>
+                <span 
+                  v-else
+                  class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded"
+                >
                   已下架
                 </span>
               </div>
               <h3 class="font-bold text-slate-800 truncate mt-0.5">
                 {{ house.case_name }}
               </h3>
+              <!-- 價格資訊 (支援重新上架改價比對) -->
               <div class="text-[11px] text-slate-500 flex items-center justify-between mt-0.5">
-                <span>下架前開價: <strong class="text-slate-700">{{ house.price }} 萬</strong></span>
+                <span v-if="house.relisted_at && house.relisted_price && Math.abs(house.relisted_price - house.price) >= 0.01">
+                  下架前: <span class="line-through text-slate-400">{{ house.price }}萬</span>
+                  ➔ 目前在售: <strong class="text-amber-700">{{ house.relisted_price }} 萬</strong>
+                  <span v-if="house.relisted_price < house.price" class="text-red-500 font-bold ml-1">
+                    (↓ 降 {{ Math.round((house.price - house.relisted_price) * 100) / 100 }}萬)
+                  </span>
+                  <span v-else class="text-emerald-600 font-bold ml-1">
+                    (↑ 漲 {{ Math.round((house.relisted_price - house.price) * 100) / 100 }}萬)
+                  </span>
+                </span>
+                <span v-else>
+                  下架前開價: <strong class="text-slate-700">{{ house.price }} 萬</strong>
+                  <span v-if="house.relisted_at" class="text-emerald-600 text-[10px] font-medium ml-1">(在售同價)</span>
+                </span>
                 <div class="flex items-center gap-1.5">
                   <span v-if="house.reg_area">{{ house.reg_area }} 坪</span>
                   <span v-if="formatFloor(house.from_floor, house.to_floor, house.up_floor)" class="text-slate-400">• {{ formatFloor(house.from_floor, house.to_floor, house.up_floor) }}</span>
                 </div>
               </div>
-              <div class="text-[10px] text-slate-400 mt-0.5">
-                🕒 下架時間: {{ house.offline_at || '本週' }}
+              <div class="text-[10px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2">
+                <span>🕒 下架時間: {{ house.offline_at || '本週' }}</span>
+                <span v-if="house.relisted_at" class="text-emerald-600 font-medium">➔ 重新上架: {{ house.relisted_at }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 區塊三：上週下架物件 -->
+      <section v-if="trendsTab === 'last_week_offline'" class="space-y-3">
+        <div class="flex items-center justify-between border-b pb-1.5 border-slate-200">
+          <div>
+            <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <span>📁</span> 上週下架物件
+              <span class="text-[11px] font-normal text-slate-500">({{ lastWeeklyOfflineHouses.length }} 件)</span>
+            </h2>
+            <div class="text-[10px] text-slate-400 mt-0.5">
+              統計週期：{{ lastWeekRangeText }}
+            </div>
+          </div>
+          <button @click="loadInventoryTrends(true)" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
+            <span>🔄</span> 重新整理
+          </button>
+        </div>
+
+        <div v-if="loadingTrends" class="flex flex-col items-center justify-center py-8 text-slate-400">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mb-2"></div>
+          <p class="text-xs">正在載入價格異動與下架紀錄...</p>
+        </div>
+
+        <div v-else-if="lastWeeklyOfflineHouses.length === 0" class="bg-white p-6 rounded-2xl border border-slate-200 text-center text-slate-400 space-y-1">
+          <div class="text-xl">✨</div>
+          <div class="text-xs font-medium text-slate-600">上週無下架物件紀錄</div>
+          <div class="text-[10px] text-slate-400">上週期間未有分店庫存下架或成交紀錄</div>
+        </div>
+
+        <div v-else class="space-y-2.5">
+          <div 
+            v-for="house in lastWeeklyOfflineHouses" 
+            :key="house.id || house.case_sid" 
+            class="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex gap-3 items-center hover:border-slate-300 transition"
+          >
+            <img 
+              :src="formatYcCover(house.cover)" 
+              :class="house.relisted_at ? '' : 'grayscale opacity-75'"
+              class="w-16 h-14 object-cover rounded-lg bg-slate-100 flex-shrink-0 transition-all"
+              alt="物件照片"
+            >
+            <div class="flex-1 min-w-0 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                  {{ house.branch_name || '永慶分店' }}
+                </span>
+                <!-- 重新上架 / 已下架標籤 -->
+                <span 
+                  v-if="house.relisted_at"
+                  class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                >
+                  <span>🟢</span> 已重新上架
+                </span>
+                <span 
+                  v-else
+                  class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded"
+                >
+                  已下架
+                </span>
+              </div>
+              <h3 class="font-bold text-slate-800 truncate mt-0.5">
+                {{ house.case_name }}
+              </h3>
+              <!-- 價格資訊 (支援重新上架改價比對) -->
+              <div class="text-[11px] text-slate-500 flex items-center justify-between mt-0.5">
+                <span v-if="house.relisted_at && house.relisted_price && Math.abs(house.relisted_price - house.price) >= 0.01">
+                  下架前: <span class="line-through text-slate-400">{{ house.price }}萬</span>
+                  ➔ 目前在售: <strong class="text-amber-700">{{ house.relisted_price }} 萬</strong>
+                  <span v-if="house.relisted_price < house.price" class="text-red-500 font-bold ml-1">
+                    (↓ 降 {{ Math.round((house.price - house.relisted_price) * 100) / 100 }}萬)
+                  </span>
+                  <span v-else class="text-emerald-600 font-bold ml-1">
+                    (↑ 漲 {{ Math.round((house.relisted_price - house.price) * 100) / 100 }}萬)
+                  </span>
+                </span>
+                <span v-else>
+                  下架前開價: <strong class="text-slate-700">{{ house.price }} 萬</strong>
+                  <span v-if="house.relisted_at" class="text-emerald-600 text-[10px] font-medium ml-1">(在售同價)</span>
+                </span>
+                <div class="flex items-center gap-1.5">
+                  <span v-if="house.reg_area">{{ house.reg_area }} 坪</span>
+                  <span v-if="formatFloor(house.from_floor, house.to_floor, house.up_floor)" class="text-slate-400">• {{ formatFloor(house.from_floor, house.to_floor, house.up_floor) }}</span>
+                </div>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2">
+                <span>🕒 下架時間: {{ house.offline_at || '上週' }}</span>
+                <span v-if="house.relisted_at" class="text-emerald-600 font-medium">➔ 重新上架: {{ house.relisted_at }}</span>
               </div>
             </div>
           </div>
@@ -520,11 +654,12 @@
 
         // 主視角切換 (compare: 比對診斷, trends: 分店庫存變化)
         const mainView = ref('compare');
-        const trendsTab = ref('price'); // 'price': 價格異動, 'offline': 本週下架
+        const trendsTab = ref('price'); // 'price': 價格異動, 'this_week_offline': 本週下架, 'last_week_offline': 上週下架
         const loadingTrends = ref(false);
         const trendsError = ref(null);
         const priceChangedHouses = ref([]);
         const weeklyOfflineHouses = ref([]);
+        const lastWeeklyOfflineHouses = ref([]);
 
         function formatYcCover(raw) {
           if (!raw) return 'https://via.placeholder.com/128x92?text=無照片';
@@ -557,20 +692,36 @@
           return floorStr;
         }
 
-        function getMondayThisWeek() {
+        function getMondays() {
           const d = new Date();
           const day = d.getDay();
           const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-          const monday = new Date(d.setDate(diff));
-          const y = monday.getFullYear();
-          const m = String(monday.getMonth() + 1).padStart(2, '0');
-          const dt = String(monday.getDate()).padStart(2, '0');
-          return `${y}-${m}-${dt} 00:00:00`;
+          
+          const thisMonday = new Date(d.getFullYear(), d.getMonth(), diff, 0, 0, 0);
+          const lastMonday = new Date(thisMonday);
+          lastMonday.setDate(lastMonday.getDate() - 7);
+
+          const fmt = (dt) => {
+            const y = dt.getFullYear();
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const dayStr = String(dt.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dayStr} 00:00:00`;
+          };
+
+          return {
+            thisMondayStr: fmt(thisMonday),
+            lastMondayStr: fmt(lastMonday)
+          };
         }
 
-        const weekRangeText = computed(() => {
-          const mStr = getMondayThisWeek().split(' ')[0];
-          return `${mStr} 起`;
+        const thisWeekRangeText = computed(() => {
+          const { thisMondayStr } = getMondays();
+          return `${thisMondayStr.split(' ')[0]} 起`;
+        });
+
+        const lastWeekRangeText = computed(() => {
+          const { thisMondayStr, lastMondayStr } = getMondays();
+          return `${lastMondayStr.split(' ')[0]} ~ ${thisMondayStr.split(' ')[0]}`;
         });
 
         async function loadInventoryTrends(force = false) {
@@ -645,16 +796,24 @@
             list.sort((a, b) => new Date(b.last_changed_at) - new Date(a.last_changed_at));
             priceChangedHouses.value = list;
 
-            // 2. 撈取本週下架物件 (每週一 00:00:00 起算)
-            const mondayStr = getMondayThisWeek();
-            const offlineSql = `
-              SELECT y.*, b.name as branch_name 
-              FROM yungching_houses y
-              LEFT JOIN branches b ON y.branch_id = b.branch_id
-              WHERE y.status = 'OFFLINE' AND y.offline_at >= ?
-              ORDER BY y.offline_at DESC;
+            // 2. 撈取下架日誌物件 (支援雙週查詢與重新在售追蹤)
+            const { thisMondayStr, lastMondayStr } = getMondays();
+
+            // 2-1. 本週下架 (offline_at >= 本週一 00:00:00)
+            const thisWeekSql = `
+              SELECT * FROM house_offline_logs 
+              WHERE offline_at >= ?
+              ORDER BY offline_at DESC;
             `;
-            weeklyOfflineHouses.value = await queryTurso(offlineSql, [mondayStr]);
+            weeklyOfflineHouses.value = await queryTurso(thisWeekSql, [thisMondayStr]);
+
+            // 2-2. 上週下架 (上週一 00:00:00 <= offline_at < 本週一 00:00:00)
+            const lastWeekSql = `
+              SELECT * FROM house_offline_logs 
+              WHERE offline_at >= ? AND offline_at < ?
+              ORDER BY offline_at DESC;
+            `;
+            lastWeeklyOfflineHouses.value = await queryTurso(lastWeekSql, [lastMondayStr, thisMondayStr]);
 
           } catch (err) {
             console.error("載入分店庫存動態失敗:", err);
@@ -1214,9 +1373,11 @@
           trendsError,
           priceChangedHouses,
           weeklyOfflineHouses,
+          lastWeeklyOfflineHouses,
           formatYcCover,
           formatFloor,
-          weekRangeText,
+          thisWeekRangeText,
+          lastWeekRangeText,
           loadInventoryTrends,
           switchToTrends
         };
