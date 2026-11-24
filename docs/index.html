@@ -118,11 +118,11 @@
             v-for="tab in row" 
             :key="tab.key"
             @click="currentTab = tab.key"
-            :class="currentTab === tab.key ? 'bg-emerald-600 text-white font-semibold ring-2 ring-emerald-600 ring-offset-1 shadow' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm'"
+            :class="getTabButtonClass(tab.key)"
             class="flex-1 px-2.5 py-2 rounded-lg transition-all flex items-center justify-center min-w-0">
             <span class="truncate">{{ tab.name }}</span>
             <span 
-              :class="currentTab === tab.key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'" 
+              :class="getTabBadgeClass(tab.key)" 
               class="ml-1.5 px-1.5 py-0.5 rounded-full text-[11px] font-bold shrink-0">
               {{ tab.count }}
             </span>
@@ -853,6 +853,49 @@
           { key: 'SPEC_MISMATCH', name: '規格不符', count: counts.value.SPEC_MISMATCH },
         ]);
 
+        const normalTabKeys = ['all', 'NORMAL', 'INTERNAL_ACTIVE'];
+        function isNormalTab(key) {
+          return normalTabKeys.includes(key);
+        }
+
+        function getTabButtonClass(key) {
+          const isSelected = currentTab.value === key;
+          const isNormal = normalTabKeys.includes(key);
+
+          if (isSelected) {
+            if (isNormal) {
+              return 'bg-emerald-200 text-emerald-950 font-bold border border-emerald-400 ring-2 ring-emerald-300 ring-offset-1 shadow-sm';
+            } else {
+              return 'bg-emerald-700 text-white font-bold ring-2 ring-emerald-700 ring-offset-1 shadow-md';
+            }
+          } else {
+            if (isNormal) {
+              return 'bg-emerald-50/85 text-emerald-800 border border-emerald-200/90 hover:bg-emerald-100/80 shadow-sm';
+            } else {
+              return 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm';
+            }
+          }
+        }
+
+        function getTabBadgeClass(key) {
+          const isSelected = currentTab.value === key;
+          const isNormal = normalTabKeys.includes(key);
+
+          if (isSelected) {
+            if (isNormal) {
+              return 'bg-emerald-300/90 text-emerald-950';
+            } else {
+              return 'bg-emerald-800 text-white';
+            }
+          } else {
+            if (isNormal) {
+              return 'bg-emerald-100/90 text-emerald-700';
+            } else {
+              return 'bg-slate-100 text-slate-600';
+            }
+          }
+        }
+
         const filteredItems = computed(() => {
           return items.value.filter(item => {
             // Tab 篩選
@@ -1150,6 +1193,8 @@
           currentTab,
           tabs,
           tabRows,
+          getTabButtonClass,
+          getTabBadgeClass,
           keyword,
           filteredItems,
           abnormalCount,
