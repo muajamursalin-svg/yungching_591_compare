@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "triggerEvery": 1,
-  "mode": "random",
+  "mode": "first",
   "ads": [
     {
       "id": "promo-1",
