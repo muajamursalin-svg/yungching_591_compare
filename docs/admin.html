@@ -305,8 +305,12 @@
 
               <!-- 模擬第二則廣告 Flex 卡片 -->
               <div v-if="previewAd" class="bg-white rounded-2xl overflow-hidden shadow-md max-w-[290px]">
-                <div v-if="previewImageSrc" class="w-full aspect-[16/9] bg-slate-200 overflow-hidden">
-                  <img :src="previewImageSrc" alt="預覽圖" class="w-full h-full object-cover" />
+                <div v-if="previewImageSrc" class="w-full aspect-[16/9] bg-slate-200 overflow-hidden relative">
+                  <img :src="previewImageSrc" @error="onPreviewImgError" alt="預覽圖" class="w-full h-full object-cover" />
+                  <div v-if="imgSyncing" class="absolute inset-0 bg-slate-100/90 flex flex-col items-center justify-center text-xs text-slate-500 p-3 text-center">
+                    <span class="animate-spin inline-block w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full mb-1.5"></span>
+                    <span>圖片同步至 GitHub Pages 中，將自動顯示...</span>
+                  </div>
                 </div>
                 <div class="p-3.5">
                   <div v-if="previewAd.badge" class="text-[11px] font-bold text-emerald-600 mb-1">
@@ -364,6 +368,8 @@
         const uploadingIdx = ref(null);
         const uploadStatus = ref({});
         const localPreviewMap = ref({});
+        const imgSyncing = ref(false);
+        const imgRetryBust = ref(0);
         const selectedIdx = ref(0);
         const toast = ref({ type: "success", message: "" });
 
@@ -387,13 +393,30 @@
           const ad = previewAd.value;
           if (!ad) return "";
           if (ad.imageUrl && localPreviewMap.value[ad.imageUrl]) {
+            imgSyncing.value = false;
             return localPreviewMap.value[ad.imageUrl];
           }
           if (localPreviewMap.value["__idx_" + selectedIdx.value]) {
+            imgSyncing.value = false;
             return localPreviewMap.value["__idx_" + selectedIdx.value];
           }
-          return ad.imageUrl || "";
+          if (!ad.imageUrl) return "";
+          return imgRetryBust.value > 0
+            ? (ad.imageUrl + (ad.imageUrl.includes("?") ? "&" : "?") + "r=" + imgRetryBust.value)
+            : ad.imageUrl;
         });
+
+        let retryTimer = null;
+        function onPreviewImgError() {
+          const ad = previewAd.value;
+          if (!ad || !ad.imageUrl || localPreviewMap.value[ad.imageUrl]) return;
+          imgSyncing.value = true;
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => {
+            imgRetryBust.value = Date.now();
+            imgSyncing.value = false;
+          }, 5000);
+        }
 
         function showToast(message, type = "success") {
           toast.value = { type, message };
@@ -625,6 +648,8 @@
           config,
           previewAd,
           previewImageSrc,
+          imgSyncing,
+          onPreviewImgError,
           login,
           logout,
           reloadConfig,
