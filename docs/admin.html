@@ -14,292 +14,348 @@
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen">
-  <div id="app" v-cloak class="max-w-5xl mx-auto pb-16">
-    <!-- 頂部導航 -->
-    <header class="bg-emerald-600 text-white px-4 sm:px-6 py-4 shadow-md sticky top-0 z-30">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 class="text-base sm:text-lg font-bold flex items-center gap-2">
-            <span>🛠️</span>
+  <div id="app" v-cloak class="min-h-screen">
+
+    <!-- ─────────────────────────────────────────────── -->
+    <!-- 未登入畫面：管理員登入驗證閘門 -->
+    <!-- ─────────────────────────────────────────────── -->
+    <div v-if="!authenticated" class="min-h-screen flex items-center justify-center p-4">
+      <div class="w-full max-w-md bg-white rounded-3xl shadow-lg border border-slate-200 overflow-hidden">
+        <div class="bg-emerald-600 text-white px-6 py-5">
+          <h1 class="text-lg font-bold flex items-center gap-2">
+            <span>🔐</span>
             <span>LINE 廣告圖文編輯器</span>
           </h1>
-          <p class="text-xs text-emerald-100 mt-0.5">直接編寫圖片、文字與外部連結，儲存後即同步至 GitHub 與 LINE Bot</p>
+          <p class="text-xs text-emerald-100 mt-1">請輸入管理密碼進行驗證，驗證通過後即可編輯與發布廣告</p>
         </div>
-        <div class="flex items-center gap-2">
-          <a href="./promo.html" target="_blank" class="text-xs bg-emerald-700/80 hover:bg-emerald-800 px-3 py-1.5 rounded-lg transition">
-            預覽公開頁面 ↗
-          </a>
-          <button
-            @click="saveConfig"
-            :disabled="saving || !gasUrl"
-            class="bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 font-bold text-xs sm:text-sm px-4 py-1.5 rounded-lg shadow transition flex items-center gap-1.5"
-          >
-            <span v-if="saving" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-emerald-600 border-t-transparent rounded-full"></span>
-            <span>{{ saving ? "儲存中..." : "💾 儲存並生效" }}</span>
-          </button>
-        </div>
-      </div>
-    </header>
 
-    <main class="p-4 sm:p-6 space-y-5">
-      <!-- 提示訊息 -->
-      <div v-if="toast.message" :class="toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'" class="border rounded-xl px-4 py-3 text-sm flex items-center justify-between shadow-sm">
-        <span>{{ toast.message }}</span>
-        <button @click="toast.message = ''" class="text-xs opacity-60 hover:opacity-100 ml-3">✕</button>
-      </div>
+        <form @submit.prevent="login" class="p-6 space-y-4">
+          <div v-if="loginError" class="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-3.5 py-2.5">
+            {{ loginError }}
+          </div>
 
-      <!-- 連線與驗證設定 -->
-      <section class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
-        <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1.5">
-          <span>🔐</span> 連線與權限設定
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <div class="md:col-span-6">
-            <label class="block text-xs font-semibold text-slate-600 mb-1">GAS Web App 網址</label>
+          <!-- 若尚未記住 GAS 網址或使用者手動展開修改，才顯示 GAS 網址輸入欄 -->
+          <div v-if="showGasInput">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">
+              GAS Web App 網址 <span class="text-slate-400 font-normal">(填寫一次即自動記住)</span>
+            </label>
             <input
               v-model.trim="gasUrl"
               type="url"
+              required
               placeholder="https://script.google.com/macros/s/.../exec"
-              class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              class="w-full text-sm border border-slate-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-          <div class="md:col-span-4">
+          <div v-else class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-500">
+            <span class="truncate">✅ 已綁定 GAS 連線網址</span>
+            <button type="button" @click="showGasInput = true" class="text-emerald-600 hover:underline font-semibold shrink-0 ml-2">
+              ⚙️ 更換網址
+            </button>
+          </div>
+
+          <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">管理密碼 (GAS: ADMIN_PASSWORD)</label>
             <input
               v-model="password"
               type="password"
-              placeholder="輸入管理密碼以啟用儲存與上傳"
-              class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              required
+              autofocus
+              placeholder="請輸入管理密碼"
+              class="w-full text-sm border border-slate-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-          <div class="md:col-span-2">
-            <button
-              @click="loadConfig"
-              :disabled="loading"
-              class="w-full bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-sm font-semibold py-2 px-3 rounded-xl transition"
-            >
-              {{ loading ? "讀取中..." : "🔄 重新載入" }}
-            </button>
-          </div>
-        </div>
-      </section>
 
-      <!-- 推播規則設定 -->
-      <section class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" v-model="config.enabled" class="sr-only peer">
-              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-            <div>
-              <div class="text-sm font-bold text-slate-800">啟用廣告推播</div>
-              <div class="text-xs text-slate-500">所有平台查詢加總達指定倍數時附帶廣告卡片</div>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-4">
-            <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">觸發倍數 (每幾次)</label>
-              <input
-                v-model.number="config.triggerEvery"
-                type="number"
-                min="1"
-                class="w-24 text-sm border border-slate-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">多則廣告顯示方式</label>
-              <select
-                v-model="config.mode"
-                class="text-sm border border-slate-300 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="random">隨機輪播一則</option>
-                <option value="first">固定顯示第一則</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 主編輯區與即時預覽 -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <!-- 左側：廣告項目表單 -->
-        <div class="lg:col-span-7 space-y-4">
-          <div class="flex items-center justify-between">
-            <h2 class="text-sm font-bold text-slate-700">廣告清單（共 {{ config.ads.length }} 則）</h2>
-            <button
-              @click="addAd"
-              class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition"
-            >
-              ＋ 新增廣告
-            </button>
-          </div>
-
-          <div
-            v-for="(ad, idx) in config.ads"
-            :key="ad.id || idx"
-            @click="selectedIdx = idx"
-            :class="selectedIdx === idx ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200'"
-            class="bg-white rounded-2xl border p-4 sm:p-5 shadow-sm space-y-3.5 transition cursor-pointer"
+          <button
+            type="submit"
+            :disabled="loggingIn"
+            class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow transition flex items-center justify-center gap-2"
           >
-            <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">
-                廣告 #{{ idx + 1 }} {{ selectedIdx === idx ? "（預覽中）" : "" }}
-              </span>
+            <span v-if="loggingIn" class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+            <span>{{ loggingIn ? "驗證中..." : "🔓 登入驗證" }}</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────── -->
+    <!-- 已登入畫面：完整廣告圖文編輯器 -->
+    <!-- ─────────────────────────────────────────────── -->
+    <div v-else class="max-w-5xl mx-auto pb-16">
+      <!-- 頂部導航 -->
+      <header class="bg-emerald-600 text-white px-4 sm:px-6 py-4 shadow-md sticky top-0 z-30">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 class="text-base sm:text-lg font-bold flex items-center gap-2">
+              <span>🛠️</span>
+              <span>LINE 廣告圖文編輯器</span>
+            </h1>
+            <p class="text-xs text-emerald-100 mt-0.5">直接編寫圖片、文字與外部連結，儲存後即同步至 GitHub 與 LINE Bot</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <a href="./promo.html" target="_blank" class="text-xs bg-emerald-700/80 hover:bg-emerald-800 px-3 py-1.5 rounded-lg transition">
+              預覽公開頁面 ↗
+            </a>
+            <button
+              @click="saveConfig"
+              :disabled="saving"
+              class="bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 font-bold text-xs sm:text-sm px-4 py-1.5 rounded-lg shadow transition flex items-center gap-1.5"
+            >
+              <span v-if="saving" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-emerald-600 border-t-transparent rounded-full"></span>
+              <span>{{ saving ? "儲存中..." : "💾 儲存並生效" }}</span>
+            </button>
+            <button
+              @click="logout"
+              class="text-xs bg-emerald-800/70 hover:bg-emerald-900 px-2.5 py-1.5 rounded-lg transition"
+              title="登出"
+            >
+              登出
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main class="p-4 sm:p-6 space-y-5">
+        <!-- 提示訊息 -->
+        <div v-if="toast.message" :class="toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'" class="border rounded-xl px-4 py-3 text-sm flex items-center justify-between shadow-sm">
+          <span>{{ toast.message }}</span>
+          <button @click="toast.message = ''" class="text-xs opacity-60 hover:opacity-100 ml-3">✕</button>
+        </div>
+
+        <!-- 推播規則設定 -->
+        <section class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="config.enabled" class="sr-only peer">
+                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+              <div>
+                <div class="text-sm font-bold text-slate-800">啟用廣告推播</div>
+                <div class="text-xs text-slate-500">所有平台查詢加總達指定倍數時附帶廣告卡片</div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">觸發倍數 (每幾次)</label>
+                <input
+                  v-model.number="config.triggerEvery"
+                  type="number"
+                  min="1"
+                  class="w-24 text-sm border border-slate-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">多則廣告顯示方式</label>
+                <select
+                  v-model="config.mode"
+                  class="text-sm border border-slate-300 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="random">隨機輪播一則</option>
+                  <option value="first">固定顯示第一則</option>
+                </select>
+              </div>
+              <div class="pt-4">
+                <button
+                  @click="reloadConfig"
+                  :disabled="loading"
+                  class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded-xl transition"
+                >
+                  {{ loading ? "讀取中..." : "🔄 重新載入" }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 主編輯區與即時預覽 -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <!-- 左側：廣告項目表單 -->
+          <div class="lg:col-span-7 space-y-4">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-bold text-slate-700">廣告清單（共 {{ config.ads.length }} 則）</h2>
               <button
-                @click.stop="removeAd(idx)"
-                class="text-xs text-red-500 hover:text-red-700 font-semibold px-2 py-1 rounded hover:bg-red-50 transition"
+                @click="addAd"
+                class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition"
               >
-                刪除
+                ＋ 新增廣告
               </button>
             </div>
 
-            <!-- 圖片上傳與網址 -->
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="text-xs font-semibold text-slate-600">廣告圖片（支援上傳或貼上 HTTPS 網址）</label>
-                <label class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 cursor-pointer bg-emerald-50 px-2.5 py-1 rounded-lg">
-                  <span>{{ uploadingIdx === idx ? "上傳中..." : "📤 選擇圖片上傳" }}</span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    class="hidden"
-                    :disabled="uploadingIdx !== null"
-                    @change="uploadImage($event, idx)"
-                  />
-                </label>
-              </div>
-              <input
-                v-model.trim="ad.imageUrl"
-                type="url"
-                placeholder="https://... (建議 16:9 JPG/PNG，檔案 1MB 以內)"
-                class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">小標籤 (選填)</label>
-                <input
-                  v-model="ad.badge"
-                  type="text"
-                  placeholder="例：精選推薦"
-                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">按鈕文字</label>
-                <input
-                  v-model="ad.buttonText"
-                  type="text"
-                  maxlength="20"
-                  placeholder="例：前往查看詳情"
-                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">廣告標題</label>
-              <input
-                v-model="ad.title"
-                type="text"
-                placeholder="輸入吸引人的標題..."
-                class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">廣告說明文字</label>
-              <textarea
-                v-model="ad.description"
-                rows="3"
-                placeholder="輸入說明內容..."
-                class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              ></textarea>
-            </div>
-
-            <div>
-              <label class="block text-xs font-semibold text-slate-600 mb-1">點擊跳轉的外部網頁連結</label>
-              <input
-                v-model.trim="ad.linkUrl"
-                type="url"
-                placeholder="https://example.com/..."
-                class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-          </div>
-
-          <div v-if="config.ads.length === 0" class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-slate-400 text-sm">
-            目前沒有廣告項目，請點擊右上角「＋ 新增廣告」。
-          </div>
-        </div>
-
-        <!-- 右側：LINE 卡片即時預覽 -->
-        <div class="lg:col-span-5 lg:sticky lg:top-24">
-          <div class="bg-[#8cabd9] rounded-2xl p-5 shadow-inner border border-slate-300/60">
-            <div class="text-xs font-bold text-slate-700/80 mb-3 flex items-center justify-between">
-              <span>📱 LINE 對話即時預覽</span>
-              <span class="bg-white/70 px-2 py-0.5 rounded-full text-[11px]">第 {{ config.triggerEvery || 8 }} 的倍數次觸發</span>
-            </div>
-
-            <!-- 模擬第一則系統等待訊息 -->
-            <div class="bg-white rounded-2xl p-3.5 shadow-sm text-xs text-slate-700 mb-3 max-w-[290px]">
-              <div class="font-bold text-emerald-700 mb-1">✅ 收到！已啟動庫存比對任務</div>
-              <div class="text-slate-500 leading-relaxed">
-                📈 個人累計查詢: 第 {{ config.triggerEvery || 8 }} 次<br>
-                ⏳ 系統正在進行庫存比對（約需 30~45 秒）...
-              </div>
-            </div>
-
-            <!-- 模擬第二則廣告 Flex 卡片 -->
-            <div v-if="previewAd" class="bg-white rounded-2xl overflow-hidden shadow-md max-w-[290px]">
-              <div v-if="previewAd.imageUrl" class="w-full aspect-[16/9] bg-slate-200 overflow-hidden">
-                <img :src="previewAd.imageUrl" alt="預覽圖" class="w-full h-full object-cover" />
-              </div>
-              <div class="p-3.5">
-                <div v-if="previewAd.badge" class="text-[11px] font-bold text-emerald-600 mb-1">
-                  {{ previewAd.badge }}
-                </div>
-                <div class="text-base font-bold text-slate-900 leading-snug mb-1.5">
-                  {{ previewAd.title || "（尚未輸入標題）" }}
-                </div>
-                <div class="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                  {{ previewAd.description || "（尚未輸入說明文字）" }}
-                </div>
-              </div>
-              <div v-if="previewAd.linkUrl" class="px-3.5 pb-3.5">
-                <a
-                  :href="previewAd.linkUrl"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-lg transition"
+            <div
+              v-for="(ad, idx) in config.ads"
+              :key="ad.id || idx"
+              @click="selectedIdx = idx"
+              :class="selectedIdx === idx ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200'"
+              class="bg-white rounded-2xl border p-4 sm:p-5 shadow-sm space-y-3.5 transition cursor-pointer"
+            >
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">
+                  廣告 #{{ idx + 1 }} {{ selectedIdx === idx ? "（預覽中）" : "" }}
+                </span>
+                <button
+                  @click.stop="removeAd(idx)"
+                  class="text-xs text-red-500 hover:text-red-700 font-semibold px-2 py-1 rounded hover:bg-red-50 transition"
                 >
-                  {{ previewAd.buttonText || "前往查看" }}
-                </a>
+                  刪除
+                </button>
               </div>
-              <div class="px-3.5 pb-3.5 text-center text-[11px] text-slate-500">
-                ⏳ 目前比對中 請等待系統回傳庫存分析結果
+
+              <!-- 圖片上傳與網址 -->
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-xs font-semibold text-slate-600">廣告圖片（支援上傳或貼上 HTTPS 網址）</label>
+                  <label class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 cursor-pointer bg-emerald-50 px-2.5 py-1 rounded-lg">
+                    <span>{{ uploadingIdx === idx ? "上傳中..." : "📤 選擇圖片上傳" }}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      class="hidden"
+                      :disabled="uploadingIdx !== null"
+                      @change="uploadImage($event, idx)"
+                    />
+                  </label>
+                </div>
+                <input
+                  v-model.trim="ad.imageUrl"
+                  type="url"
+                  placeholder="https://... (建議 16:9 JPG/PNG，檔案 1MB 以內)"
+                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">小標籤 (選填)</label>
+                  <input
+                    v-model="ad.badge"
+                    type="text"
+                    placeholder="例：精選推薦"
+                    class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">按鈕文字</label>
+                  <input
+                    v-model="ad.buttonText"
+                    type="text"
+                    maxlength="20"
+                    placeholder="例：前往查看詳情"
+                    class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">廣告標題</label>
+                <input
+                  v-model="ad.title"
+                  type="text"
+                  placeholder="輸入吸引人的標題..."
+                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">廣告說明文字</label>
+                <textarea
+                  v-model="ad.description"
+                  rows="3"
+                  placeholder="輸入說明內容..."
+                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                ></textarea>
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">點擊跳轉的外部網頁連結</label>
+                <input
+                  v-model.trim="ad.linkUrl"
+                  type="url"
+                  placeholder="https://example.com/..."
+                  class="w-full text-sm border border-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
               </div>
             </div>
-            <div v-else class="bg-white/70 rounded-2xl p-6 text-center text-xs text-slate-600 max-w-[290px]">
-              請先新增一則廣告以檢視預覽效果
+
+            <div v-if="config.ads.length === 0" class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-slate-400 text-sm">
+              目前沒有廣告項目，請點擊右上角「＋ 新增廣告」。
+            </div>
+          </div>
+
+          <!-- 右側：LINE 卡片即時預覽 -->
+          <div class="lg:col-span-5 lg:sticky lg:top-24">
+            <div class="bg-[#8cabd9] rounded-2xl p-5 shadow-inner border border-slate-300/60">
+              <div class="text-xs font-bold text-slate-700/80 mb-3 flex items-center justify-between">
+                <span>📱 LINE 對話即時預覽</span>
+                <span class="bg-white/70 px-2 py-0.5 rounded-full text-[11px]">第 {{ config.triggerEvery || 8 }} 的倍數次觸發</span>
+              </div>
+
+              <!-- 模擬第一則系統等待訊息 -->
+              <div class="bg-white rounded-2xl p-3.5 shadow-sm text-xs text-slate-700 mb-3 max-w-[290px]">
+                <div class="font-bold text-emerald-700 mb-1">✅ 收到！已啟動庫存比對任務</div>
+                <div class="text-slate-500 leading-relaxed">
+                  📈 個人累計查詢: 第 {{ config.triggerEvery || 8 }} 次<br>
+                  ⏳ 系統正在進行庫存比對（約需 30~45 秒）...
+                </div>
+              </div>
+
+              <!-- 模擬第二則廣告 Flex 卡片 -->
+              <div v-if="previewAd" class="bg-white rounded-2xl overflow-hidden shadow-md max-w-[290px]">
+                <div v-if="previewAd.imageUrl" class="w-full aspect-[16/9] bg-slate-200 overflow-hidden">
+                  <img :src="previewAd.imageUrl" alt="預覽圖" class="w-full h-full object-cover" />
+                </div>
+                <div class="p-3.5">
+                  <div v-if="previewAd.badge" class="text-[11px] font-bold text-emerald-600 mb-1">
+                    {{ previewAd.badge }}
+                  </div>
+                  <div class="text-base font-bold text-slate-900 leading-snug mb-1.5">
+                    {{ previewAd.title || "（尚未輸入標題）" }}
+                  </div>
+                  <div class="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
+                    {{ previewAd.description || "（尚未輸入說明文字）" }}
+                  </div>
+                </div>
+                <div v-if="previewAd.linkUrl" class="px-3.5 pb-3">
+                  <a
+                    :href="previewAd.linkUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-lg transition"
+                  >
+                    {{ previewAd.buttonText || "前往查看" }}
+                  </a>
+                </div>
+                <div class="px-3.5 pb-3.5 text-center text-[11px] text-slate-500">
+                  ⏳ 目前比對中 請等待系統回傳庫存分析結果
+                </div>
+              </div>
+              <div v-else class="bg-white/70 rounded-2xl p-6 text-center text-xs text-slate-600 max-w-[290px]">
+                請先新增一則廣告以檢視預覽效果
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   </div>
 
   <script>
+    // 若想讓任何裝置打開都完全不用填 GAS 網址，可將部署好的 GAS Web App 網址填入下方引號內：
+    const DEFAULT_GAS_URL = "";
+
     const { createApp, ref, computed, watch, onMounted } = Vue;
 
     createApp({
       setup() {
         const urlParams = new URLSearchParams(window.location.search);
-        const gasUrl = ref(urlParams.get("gas_url") || localStorage.getItem("promo_gas_url") || "");
+        const initialGasUrl = urlParams.get("gas_url") || localStorage.getItem("promo_gas_url") || DEFAULT_GAS_URL;
+        const gasUrl = ref(initialGasUrl);
+        const showGasInput = ref(!initialGasUrl);
         const password = ref(sessionStorage.getItem("promo_admin_pw") || "");
+        const authenticated = ref(false);
+        const loggingIn = ref(false);
+        const loginError = ref("");
         const loading = ref(false);
         const saving = ref(false);
         const uploadingIdx = ref(null);
@@ -316,9 +372,6 @@
         watch(gasUrl, (val) => {
           if (val) localStorage.setItem("promo_gas_url", val);
         });
-        watch(password, (val) => {
-          if (val) sessionStorage.setItem("promo_admin_pw", val);
-        });
 
         const previewAd = computed(() => {
           if (!config.value.ads.length) return null;
@@ -329,33 +382,75 @@
           toast.value = { type, message };
         }
 
-        async function loadConfig() {
+        function applyLoadedConfig(data) {
+          config.value = {
+            enabled: data.enabled !== false,
+            triggerEvery: Number(data.triggerEvery) > 0 ? Number(data.triggerEvery) : 8,
+            mode: data.mode === "first" ? "first" : "random",
+            ads: Array.isArray(data.ads) ? data.ads : []
+          };
+          selectedIdx.value = 0;
+        }
+
+        async function login() {
+          loginError.value = "";
+          if (!gasUrl.value) {
+            showGasInput.value = true;
+            loginError.value = "請填寫 GAS Web App 網址。";
+            return;
+          }
+          if (!password.value) {
+            loginError.value = "請輸入管理密碼。";
+            return;
+          }
+
+          loggingIn.value = true;
+          try {
+            const res = await fetch(gasUrl.value, {
+              method: "POST",
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                action: "verify_admin",
+                password: password.value
+              })
+            });
+            const json = await res.json();
+            if (json.status !== "success") {
+              throw new Error(json.error || "管理密碼錯誤");
+            }
+            localStorage.setItem("promo_gas_url", gasUrl.value);
+            sessionStorage.setItem("promo_admin_pw", password.value);
+            showGasInput.value = false;
+            if (json.config) applyLoadedConfig(json.config);
+            authenticated.value = true;
+            showToast("驗證成功！已載入目前廣告設定。");
+          } catch (err) {
+            sessionStorage.removeItem("promo_admin_pw");
+            loginError.value = err.message || "連線或驗證失敗";
+          } finally {
+            loggingIn.value = false;
+          }
+        }
+
+        function logout() {
+          authenticated.value = false;
+          password.value = "";
+          sessionStorage.removeItem("promo_admin_pw");
+          loginError.value = "";
+        }
+
+        async function reloadConfig() {
           loading.value = true;
           toast.value.message = "";
           try {
-            let data = null;
-            if (gasUrl.value) {
-              const res = await fetch(`${gasUrl.value}?action=get_ads&t=${Date.now()}`);
-              const json = await res.json();
-              if (json.status === "success" && json.config) {
-                data = json.config;
-              } else {
-                throw new Error(json.error || "GAS 回傳格式錯誤");
-              }
+            const res = await fetch(`${gasUrl.value}?action=get_ads&t=${Date.now()}`);
+            const json = await res.json();
+            if (json.status === "success" && json.config) {
+              applyLoadedConfig(json.config);
+              showToast("已重新載入最新廣告設定！");
             } else {
-              const res = await fetch(`./ads.json?t=${Date.now()}`, { cache: "no-store" });
-              if (!res.ok) throw new Error("無法讀取預設 ads.json");
-              data = await res.json();
+              throw new Error(json.error || "GAS 回傳格式錯誤");
             }
-
-            config.value = {
-              enabled: data.enabled !== false,
-              triggerEvery: Number(data.triggerEvery) > 0 ? Number(data.triggerEvery) : 8,
-              mode: data.mode === "first" ? "first" : "random",
-              ads: Array.isArray(data.ads) ? data.ads : []
-            };
-            selectedIdx.value = 0;
-            showToast("已載入目前廣告設定！");
           } catch (err) {
             showToast("載入失敗：" + err.message, "error");
           } finally {
@@ -397,14 +492,6 @@
           event.target.value = "";
           if (!file) return;
 
-          if (!gasUrl.value) {
-            showToast("請先填寫 GAS Web App 網址再上傳圖片。", "error");
-            return;
-          }
-          if (!password.value) {
-            showToast("請先輸入管理密碼再上傳圖片。", "error");
-            return;
-          }
           if (file.size > 2 * 1024 * 1024) {
             showToast("圖片請控制在 2MB 以內（建議 1MB 以內載入最快）。", "error");
             return;
@@ -437,15 +524,6 @@
         }
 
         async function saveConfig() {
-          if (!gasUrl.value) {
-            showToast("請先填寫 GAS Web App 網址。", "error");
-            return;
-          }
-          if (!password.value) {
-            showToast("請先輸入管理密碼。", "error");
-            return;
-          }
-
           saving.value = true;
           toast.value.message = "";
           try {
@@ -471,12 +549,18 @@
         }
 
         onMounted(() => {
-          loadConfig();
+          if (gasUrl.value && password.value) {
+            login();
+          }
         });
 
         return {
           gasUrl,
+          showGasInput,
           password,
+          authenticated,
+          loggingIn,
+          loginError,
           loading,
           saving,
           uploadingIdx,
@@ -484,7 +568,9 @@
           toast,
           config,
           previewAd,
-          loadConfig,
+          login,
+          logout,
+          reloadConfig,
           addAd,
           removeAd,
           uploadImage,

@@ -112,8 +112,8 @@ function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
 
-    // 處理廣告後台編輯器請求 (save_ads / upload_ad_image)
-    if (postData && (postData.action === "save_ads" || postData.action === "upload_ad_image")) {
+    // 處理廣告後台編輯器請求 (verify_admin / save_ads / upload_ad_image)
+    if (postData && (postData.action === "verify_admin" || postData.action === "save_ads" || postData.action === "upload_ad_image")) {
       const result = handlePromoAdminPost(postData);
       return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
     }
@@ -1666,6 +1666,11 @@ function handlePromoAdminPost(postData) {
 
   if (!githubToken || !githubRepo) {
     return { status: "error", error: "GAS 缺少 GITHUB_TOKEN 或 GITHUB_REPO 設定。" };
+  }
+
+  if (postData.action === "verify_admin") {
+    const adsData = getAdsConfigForAdmin(githubRepo, githubToken, baseUrl);
+    return { status: "success", config: adsData, baseUrl: baseUrl };
   }
 
   if (postData.action === "upload_ad_image") {
