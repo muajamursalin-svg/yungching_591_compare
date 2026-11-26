@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "triggerEvery": 8,
+  "triggerEvery": 1,
   "mode": "random",
   "ads": [
     {
