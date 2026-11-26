@@ -1552,13 +1552,25 @@ function buildPromoFlexMessage(ad, baseUrl, isWaiting) {
   }
   if (isWaiting !== false) {
     footerContents.push({
-      type: "text",
-      text: "⏳ 目前比對中 請等待系統回傳庫存分析結果",
-      size: "xs",
-      color: "#64748b",
-      align: "center",
-      wrap: true,
-      margin: linkUrl ? "md" : "none"
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#FEF3C7",
+      borderColor: "#F59E0B",
+      borderWidth: "1px",
+      cornerRadius: "md",
+      paddingAll: "10px",
+      margin: linkUrl ? "md" : "none",
+      contents: [
+        {
+          type: "text",
+          text: "⏳ 目前比對中，請等待系統回傳庫存分析結果",
+          size: "sm",
+          weight: "bold",
+          color: "#B45309",
+          align: "center",
+          wrap: true
+        }
+      ]
     });
   }
   if (footerContents.length > 0) {
