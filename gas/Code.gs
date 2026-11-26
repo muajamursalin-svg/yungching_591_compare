@@ -21,10 +21,19 @@
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    const scriptProps = PropertiesService.getScriptProperties();
+
+    if (action === "get_ads") {
+      const liffUrl = scriptProps.getProperty("LIFF_URL") || "https://muajamursalin-svg.github.io/yungching_591_compare/";
+      const baseUrl = getPromoBaseUrl(liffUrl);
+      const githubToken = scriptProps.getProperty("GITHUB_TOKEN");
+      const githubRepo = scriptProps.getProperty("GITHUB_REPO") || "muajamursalin-svg/yungching_591_compare";
+      const adsData = getAdsConfigForAdmin(githubRepo, githubToken, baseUrl);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", config: adsData, baseUrl: baseUrl })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const reportId = e.parameter.report_id;
     const shopId = e.parameter.shop_id || "12017";
-
-    const scriptProps = PropertiesService.getScriptProperties();
     const tursoUrl = scriptProps.getProperty("TURSO_DATABASE_URL") || "https://yungchingbranchstore-steven0612.aws-ap-northeast-1.turso.io";
     const tursoToken = scriptProps.getProperty("TURSO_AUTH_TOKEN") || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTUxNzk0MTcsImlkIjoiMDFhMWY5MDctNmQwMS03MjdkLWJkNWQtZjJmZTI3ZTE0OWExIiwia2lkIjoiUGtZTm9rMU9pRGFlVW1GNXZsVDJKbmJaTUtDSmZlZGZLZFFncFI0RlFMdyIsInJpZCI6ImQwMDA1ZmMyLTk0MTMtNDc5Yy1hZTY3LWFhNDliMGJhZDRjNCJ9.aexx6RjPmK42KGAGQP2zihQZv53w9wjkPtNdB-MMb7gA51JHJDhDEavmfeE3NSUnhD9QEYWukpod2oqeg1c2Dw";
 
@@ -102,6 +111,13 @@ function doGet(e) {
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
+
+    // 處理廣告後台編輯器請求 (save_ads / upload_ad_image)
+    if (postData && (postData.action === "save_ads" || postData.action === "upload_ad_image")) {
+      const result = handlePromoAdminPost(postData);
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const events = postData.events;
     if (!events || events.length === 0) {
       return ContentService.createTextOutput("OK");
@@ -168,7 +184,10 @@ function doPost(e) {
             `📈 個人累計查詢: 第 ${count} 次\n` +
             `⏳ 系統現正同步最新庫存並進行多維特徵比對...\n\n` +
             `比對完成後將會主動發送推播報告通知您！`,
-            qr
+            qr,
+            null,
+            null,
+            buildPromoExtraMessages(getTotalShopCount(latestShops), liffUrl)
           );
           continue;
 
@@ -206,7 +225,10 @@ function doPost(e) {
             `📍 ${platform} 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
             `⏳ 系統現正進行庫存比對，完成後將推播報告通知您！`,
-            qr
+            qr,
+            null,
+            null,
+            buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
           );
           continue;
 
@@ -304,7 +326,9 @@ function doPost(e) {
             replyLineMessage(lineToken, replyToken,
               summaryText,
               userShops,
-              targetLiff
+              targetLiff,
+              null,
+              buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl, false)
             );
             continue;
           }
@@ -320,7 +344,10 @@ function doPost(e) {
               `📈 個人累計查詢: 第 ${newCnt} 次\n` +
               `⏳ 系統正在同步 ${reqPlatform} 與永慶分店庫存並進行比對（約需 30~45 秒）...\n\n` +
               `比對完成後將會主動推播報告給您！`,
-              qr
+              qr,
+              null,
+              null,
+              buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
             );
           } else {
             releaseUserQueryLock(tursoUrl, tursoToken, userId);
@@ -464,7 +491,9 @@ function doPost(e) {
             replyLineMessage(lineToken, replyToken,
               summaryText,
               userShops,
-              targetLiff
+              targetLiff,
+              null,
+              buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl, false)
             );
             continue;
           }
@@ -482,7 +511,10 @@ function doPost(e) {
               memoryTip +
               `⏳ 系統正在同步 ${platform} 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
               `比對完成後將會主動發送推播報告通知您！`,
-              qr
+              qr,
+              null,
+              null,
+              buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
             );
           } else {
             releaseUserQueryLock(tursoUrl, tursoToken, userId);
@@ -695,6 +727,17 @@ function getShopCount(userShops, platform) {
   if (platform === "5168") return userShops.count_5168 || 1;
   if (platform === "rakuya") return userShops.count_rakuya || 1;
   return userShops.count_591 || 1;
+}
+
+/**
+ * 取得所有平台 (591 + 5168 + 樂屋網) 的累積查詢總次數
+ */
+function getTotalShopCount(userShops) {
+  if (!userShops) return 1;
+  const c591 = Number(userShops.count_591) || 0;
+  const c5168 = Number(userShops.count_5168) || 0;
+  const cRakuya = Number(userShops.count_rakuya) || 0;
+  return c591 + c5168 + cRakuya;
 }
 
 // ───────────────────────────────────────────────
@@ -1176,9 +1219,9 @@ function formatCompareSummaryText(platform, shopId, currentCount, total, matched
 }
 
 /**
- * LINE Messaging API 回覆訊息 (全面支援 Flex 訊息卡片 + 實體按鈕 + 底部 Quick Reply)
+ * LINE Messaging API 回覆訊息 (全面支援 Flex 訊息卡片 + 實體按鈕 + 底部 Quick Reply + 額外附加訊息)
  */
-function replyLineMessage(token, replyToken, text, userShops, liffUrl, customButtons) {
+function replyLineMessage(token, replyToken, text, userShops, liffUrl, customButtons, extraMessages) {
   if (!token) return;
   const url = "https://api.line.me/v2/bot/message/reply";
 
@@ -1212,10 +1255,14 @@ function replyLineMessage(token, replyToken, text, userShops, liffUrl, customBut
   }
 
   const msgObj = buildInteractiveMessage(text, userShops, liffUrl, customButtons);
+  let messages = [msgObj];
+  if (Array.isArray(extraMessages) && extraMessages.length > 0) {
+    messages = messages.concat(extraMessages).slice(0, 5);
+  }
 
   const payload = {
     replyToken: replyToken,
-    messages: [msgObj]
+    messages: messages
   };
 
   const options = {
@@ -1362,5 +1409,345 @@ function releaseUserQueryLock(tursoUrl, tursoToken, userId) {
     });
   } catch (err) {
     console.warn("releaseUserQueryLock failed: " + err);
+  }
+}
+
+// ───────────────────────────────────────────────
+// 查詢次數達標推播廣告 (GitHub Pages ads.json + Flex 卡片)
+// ───────────────────────────────────────────────
+
+/**
+ * 依據 LIFF_URL 推導 GitHub Pages 根目錄網址
+ */
+function getPromoBaseUrl(liffUrl) {
+  const fallback = "https://muajamursalin-svg.github.io/yungching_591_compare/";
+  if (!liffUrl || typeof liffUrl !== "string") return fallback;
+  const cleanUrl = liffUrl.split("?")[0].split("#")[0].trim();
+  if (!cleanUrl.startsWith("http")) return fallback;
+  if (cleanUrl.endsWith("/")) return cleanUrl;
+  const lastSlash = cleanUrl.lastIndexOf("/");
+  if (lastSlash > cleanUrl.indexOf("://") + 2) {
+    const tail = cleanUrl.slice(lastSlash + 1);
+    if (tail.indexOf(".") !== -1) {
+      return cleanUrl.slice(0, lastSlash + 1);
+    }
+  }
+  return cleanUrl + "/";
+}
+
+/**
+ * 從 GitHub Pages 讀取 ads.json (含 10 分鐘 GAS CacheService 快取)
+ */
+function fetchPromoConfig(baseUrl) {
+  const cacheKey = "promo_ads_config_v1";
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+    const res = UrlFetchApp.fetch(baseUrl + "ads.json?t=" + Math.floor(Date.now() / 60000), {
+      method: "get",
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      console.warn("fetchPromoConfig HTTP " + res.getResponseCode());
+      return null;
+    }
+    const text = res.getContentText();
+    const parsed = JSON.parse(text);
+    cache.put(cacheKey, text, 600);
+    return parsed;
+  } catch (err) {
+    console.warn("fetchPromoConfig failed: " + err);
+    return null;
+  }
+}
+
+/**
+ * 組裝廣告 Flex Message 卡片 (支援圖片、標籤、標題、內文與連結按鈕)
+ */
+function buildPromoFlexMessage(ad, baseUrl, isWaiting) {
+  const isHttps = (u) => typeof u === "string" && /^https:\/\/.+/i.test(u.trim());
+  const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\/.+/i.test(u.trim());
+  const imgUrl = isHttps(ad.imageUrl) ? ad.imageUrl.trim() : null;
+  const linkUrl = isHttpUrl(ad.linkUrl) ? ad.linkUrl.trim() : (isHttpUrl(baseUrl) ? baseUrl + "promo.html" : null);
+
+  const bodyContents = [];
+  if (ad.badge) {
+    bodyContents.push({
+      type: "text",
+      text: String(ad.badge),
+      size: "xs",
+      weight: "bold",
+      color: "#059669"
+    });
+  }
+  if (ad.title) {
+    bodyContents.push({
+      type: "text",
+      text: String(ad.title),
+      size: "lg",
+      weight: "bold",
+      color: "#0f172a",
+      wrap: true,
+      margin: ad.badge ? "sm" : "none"
+    });
+  }
+  if (ad.description) {
+    bodyContents.push({
+      type: "text",
+      text: String(ad.description),
+      size: "sm",
+      color: "#475569",
+      wrap: true,
+      margin: "md"
+    });
+  }
+  if (bodyContents.length === 0) {
+    bodyContents.push({
+      type: "text",
+      text: "精選推薦資訊",
+      size: "md",
+      weight: "bold",
+      color: "#0f172a"
+    });
+  }
+
+  const bubble = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: bodyContents
+    }
+  };
+
+  if (imgUrl) {
+    bubble.hero = {
+      type: "image",
+      url: imgUrl,
+      size: "full",
+      aspectRatio: "16:9",
+      aspectMode: "cover"
+    };
+    if (linkUrl) {
+      bubble.hero.action = { type: "uri", uri: linkUrl };
+    }
+  }
+
+  const footerContents = [];
+  if (linkUrl) {
+    footerContents.push({
+      type: "button",
+      style: "primary",
+      color: "#059669",
+      height: "sm",
+      action: {
+        type: "uri",
+        label: String(ad.buttonText || "前往查看").slice(0, 20),
+        uri: linkUrl
+      }
+    });
+  }
+  if (isWaiting !== false) {
+    footerContents.push({
+      type: "text",
+      text: "⏳ 目前比對中 請等待系統回傳庫存分析結果",
+      size: "xs",
+      color: "#64748b",
+      align: "center",
+      wrap: true,
+      margin: linkUrl ? "md" : "none"
+    });
+  }
+  if (footerContents.length > 0) {
+    bubble.footer = {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: footerContents
+    };
+  }
+
+  return {
+    type: "flex",
+    altText: ad.title ? ("✨ " + String(ad.title)) : "✨ 精選推薦資訊",
+    contents: bubble
+  };
+}
+
+/**
+ * 檢查是否達到觸發門檻 (預設 count % 8 === 0)，達標則回傳附加的廣告訊息陣列
+ */
+function buildPromoExtraMessages(count, liffUrl, isWaiting) {
+  if (!count || count <= 0) return null;
+  try {
+    // 先做最常見的預設快速判斷，未達標前可減少無謂讀取；若 ads.json 自訂了不同 triggerEvery 則以設定為準
+    const baseUrl = getPromoBaseUrl(liffUrl);
+    const config = fetchPromoConfig(baseUrl);
+    if (!config || config.enabled === false || !Array.isArray(config.ads) || config.ads.length === 0) {
+      return null;
+    }
+
+    const triggerEvery = (Number(config.triggerEvery) > 0) ? Number(config.triggerEvery) : 8;
+    if (count % triggerEvery !== 0) {
+      return null;
+    }
+
+    const validAds = config.ads.filter(ad => ad && (ad.title || ad.imageUrl || ad.description));
+    if (validAds.length === 0) return null;
+
+    const selectedAd = (config.mode === "first")
+      ? validAds[0]
+      : validAds[Math.floor(Math.random() * validAds.length)];
+
+    return [buildPromoFlexMessage(selectedAd, baseUrl, isWaiting)];
+  } catch (err) {
+    console.warn("buildPromoExtraMessages failed: " + err);
+    return null;
+  }
+}
+
+// ───────────────────────────────────────────────
+// 廣告視覺化編輯器後台 API (透過 GitHub Contents API 讀寫)
+// ───────────────────────────────────────────────
+
+/**
+ * 讀取最新 ads.json 供後台編輯器使用 (優先從 GitHub API 取得即時版本)
+ */
+function getAdsConfigForAdmin(githubRepo, githubToken, baseUrl) {
+  const defaultCfg = { enabled: true, triggerEvery: 8, mode: "random", ads: [] };
+  try {
+    if (githubRepo && githubToken) {
+      const apiUrl = `https://api.github.com/repos/${githubRepo}/contents/docs/ads.json`;
+      const res = UrlFetchApp.fetch(apiUrl, {
+        method: "get",
+        headers: {
+          "Authorization": "Bearer " + githubToken,
+          "Accept": "application/vnd.github.v3+json"
+        },
+        muteHttpExceptions: true
+      });
+      if (res.getResponseCode() === 200) {
+        const fileData = JSON.parse(res.getContentText());
+        if (fileData && fileData.content) {
+          const cleanB64 = fileData.content.replace(/\s/g, "");
+          const decoded = Utilities.newBlob(Utilities.base64Decode(cleanB64)).getDataAsString("UTF-8");
+          return JSON.parse(decoded);
+        }
+      }
+    }
+    const fetched = fetchPromoConfig(baseUrl);
+    return fetched || defaultCfg;
+  } catch (err) {
+    console.warn("getAdsConfigForAdmin failed: " + err);
+    return defaultCfg;
+  }
+}
+
+/**
+ * 處理後台編輯器儲存設定與圖片上傳
+ */
+function handlePromoAdminPost(postData) {
+  const scriptProps = PropertiesService.getScriptProperties();
+  const adminPassword = scriptProps.getProperty("ADMIN_PASSWORD");
+  if (!adminPassword) {
+    return { status: "error", error: "請先至 Google Apps Script「指令碼屬性」新增 ADMIN_PASSWORD 管理密碼。" };
+  }
+  if (!postData.password || postData.password !== adminPassword) {
+    return { status: "error", error: "管理密碼錯誤，請重新確認。" };
+  }
+
+  const githubToken = scriptProps.getProperty("GITHUB_TOKEN");
+  const githubRepo = scriptProps.getProperty("GITHUB_REPO") || "muajamursalin-svg/yungching_591_compare";
+  const liffUrl = scriptProps.getProperty("LIFF_URL") || "https://muajamursalin-svg.github.io/yungching_591_compare/";
+  const baseUrl = getPromoBaseUrl(liffUrl);
+
+  if (!githubToken || !githubRepo) {
+    return { status: "error", error: "GAS 缺少 GITHUB_TOKEN 或 GITHUB_REPO 設定。" };
+  }
+
+  if (postData.action === "upload_ad_image") {
+    const rawName = String(postData.filename || "ad-image.png").replace(/[^a-zA-Z0-9._-]/g, "");
+    const extMatch = rawName.match(/\.(png|jpg|jpeg|webp)$/i);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "png";
+    const safeName = `ad-${Date.now()}.${ext}`;
+    const b64 = String(postData.base64Data || "").replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, "");
+    if (!b64) {
+      return { status: "error", error: "圖片資料為空。" };
+    }
+
+    const ok = githubPutFile(githubRepo, githubToken, `docs/images/${safeName}`, b64, `Upload promo image ${safeName}`);
+    if (!ok.success) {
+      return { status: "error", error: ok.error || "上傳圖片至 GitHub 失敗" };
+    }
+    return { status: "success", imageUrl: `${baseUrl}images/${safeName}` };
+  }
+
+  if (postData.action === "save_ads") {
+    const cfg = postData.config;
+    if (!cfg || !Array.isArray(cfg.ads)) {
+      return { status: "error", error: "廣告設定格式不正確。" };
+    }
+    const jsonStr = JSON.stringify(cfg, null, 2) + "\n";
+    const b64 = Utilities.base64Encode(Utilities.newBlob(jsonStr, "application/json", "utf-8").getBytes());
+    const ok = githubPutFile(githubRepo, githubToken, "docs/ads.json", b64, "Update docs/ads.json via promo admin");
+    if (!ok.success) {
+      return { status: "error", error: ok.error || "寫入 ads.json 至 GitHub 失敗" };
+    }
+
+    // 立即更新 GAS 快取，讓 LINE Bot 不用等 GitHub Pages 重建就能即時生效
+    try {
+      const cache = CacheService.getScriptCache();
+      cache.put("promo_ads_config_v1", jsonStr, 600);
+    } catch (e) {}
+
+    return { status: "success", message: "已儲存至 GitHub 並立即更新推播快取！" };
+  }
+
+  return { status: "error", error: "不支援的操作類型" };
+}
+
+/**
+ * 透過 GitHub Contents API 建立或更新檔案 (contentBase64 需為已編碼的 Base64 字串)
+ */
+function githubPutFile(repo, token, filePath, contentBase64, commitMessage) {
+  try {
+    const apiUrl = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    const headers = {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github.v3+json"
+    };
+
+    // 先查詢是否已存在檔案以取得 sha
+    let sha = null;
+    const getRes = UrlFetchApp.fetch(apiUrl, { method: "get", headers: headers, muteHttpExceptions: true });
+    if (getRes.getResponseCode() === 200) {
+      const existing = JSON.parse(getRes.getContentText());
+      sha = existing.sha || null;
+    }
+
+    const body = {
+      message: commitMessage,
+      content: contentBase64
+    };
+    if (sha) body.sha = sha;
+
+    const putRes = UrlFetchApp.fetch(apiUrl, {
+      method: "put",
+      headers: headers,
+      contentType: "application/json",
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true
+    });
+
+    const code = putRes.getResponseCode();
+    if (code === 200 || code === 201) {
+      return { success: true };
+    }
+    return { success: false, error: `GitHub API HTTP ${code}: ${putRes.getContentText()}` };
+  } catch (err) {
+    return { success: false, error: err.toString() };
   }
 }

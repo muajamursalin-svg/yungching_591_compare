@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "triggerEvery": 8,
+  "mode": "random",
+  "ads": [
+    {
+      "id": "promo-1",
+      "badge": "精選推薦",
+      "title": "專屬精選資訊與最新動態",
+      "description": "感謝您的頻繁使用！在等待庫存比對的期間，歡迎點擊下方按鈕查看更多精選內容與最新資訊。",
+      "imageUrl": "https://muajamursalin-svg.github.io/yungching_591_compare/images/promo-default.png",
+      "linkUrl": "https://muajamursalin-svg.github.io/yungching_591_compare/promo.html",
+      "buttonText": "查看完整內容"
+    }
+  ]
+}

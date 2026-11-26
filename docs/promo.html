@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>精選資訊與最新動態</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div class="max-w-md mx-auto min-h-screen flex flex-col">
+    <!-- 頂部標題列 -->
+    <header class="bg-emerald-600 text-white px-4 py-3.5 shadow-md sticky top-0 z-20">
+      <div class="flex items-center justify-between">
+        <h1 class="text-base font-bold flex items-center gap-2">
+          <span>✨</span>
+          <span>精選資訊與活動專區</span>
+        </h1>
+        <span class="text-xs bg-emerald-700/80 px-2.5 py-0.5 rounded-full">推薦內容</span>
+      </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main id="promo-container" class="flex-1 p-4 space-y-4">
+      <div id="loading-state" class="flex flex-col items-center justify-center py-16 text-slate-400">
+        <div class="animate-spin rounded-full h-9 w-9 border-b-2 border-emerald-600 mb-3"></div>
+        <p class="text-sm">正在載入精選內容...</p>
+      </div>
+    </main>
+
+    <!-- 頁尾 -->
+    <footer class="py-5 px-4 text-center text-xs text-slate-400">
+      <p>庫存比對系統 · 精選推薦頁面</p>
+    </footer>
+  </div>
+
+  <script>
+    (async function () {
+      const container = document.getElementById("promo-container");
+      const loadingEl = document.getElementById("loading-state");
+
+      try {
+        const res = await fetch("./ads.json?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) throw new Error("無法讀取設定檔 (HTTP " + res.status + ")");
+        const data = await res.json();
+        const ads = Array.isArray(data.ads) ? data.ads : [];
+
+        if (loadingEl) loadingEl.remove();
+
+        if (ads.length === 0) {
+          container.innerHTML = `
+            <div class="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500 shadow-sm">
+              <p class="text-base font-semibold mb-1">目前尚無展示內容</p>
+              <p class="text-xs text-slate-400">請於 GitHub 的 docs/ads.json 新增圖片、文字與連結。</p>
+            </div>
+          `;
+          return;
+        }
+
+        ads.forEach((ad) => {
+          const card = document.createElement("article");
+          card.className = "bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition";
+
+          const imgHtml = ad.imageUrl
+            ? `<div class="w-full aspect-[16/9] bg-slate-100 overflow-hidden">
+                 <img src="${escapeHtml(ad.imageUrl)}" alt="${escapeHtml(ad.title || "精選圖片")}" class="w-full h-full object-cover" loading="lazy" />
+               </div>`
+            : "";
+
+          const badgeHtml = ad.badge
+            ? `<span class="inline-block text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full mb-2">${escapeHtml(ad.badge)}</span>`
+            : "";
+
+          const titleHtml = ad.title
+            ? `<h2 class="text-lg font-bold text-slate-900 leading-snug mb-2">${escapeHtml(ad.title)}</h2>`
+            : "";
+
+          const descHtml = ad.description
+            ? `<p class="text-sm text-slate-600 leading-relaxed whitespace-pre-line mb-4">${escapeHtml(ad.description)}</p>`
+            : "";
+
+          const linkHtml = ad.linkUrl
+            ? `<a href="${escapeHtml(ad.linkUrl)}" target="_blank" rel="noopener noreferrer"
+                  class="block w-full text-center bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold text-sm py-2.5 px-4 rounded-xl transition shadow-sm">
+                 ${escapeHtml(ad.buttonText || "前往查看")}
+               </a>`
+            : "";
+
+          card.innerHTML = `
+            ${imgHtml}
+            <div class="p-4">
+              ${badgeHtml}
+              ${titleHtml}
+              ${descHtml}
+              ${linkHtml}
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (err) {
+        if (loadingEl) loadingEl.remove();
+        container.innerHTML = `
+          <div class="bg-red-50 border border-red-200 rounded-2xl p-5 text-red-700 text-sm">
+            <div class="font-bold mb-1">載入失敗</div>
+            <div>${escapeHtml(err.message || "未知錯誤")}</div>
+          </div>
+        `;
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+    })();
+  </script>
+</body>
+</html>
