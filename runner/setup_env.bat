@@ -5,58 +5,76 @@ echo   House Inventory Compare - Python Environment Setup
 echo ========================================================
 echo.
 
-:: Helper: Find working python executable (skip Windows Store stub)
 set "PY_EXE="
 
-for %%P in (
-    "python"
-    "py -3"
-    "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-    "C:\Program Files\Python312\python.exe"
-    "C:\Program Files\Python313\python.exe"
-    "C:\Python312\python.exe"
-) do (
-    if not defined PY_EXE (
-        %%~P -c "import sys; print(sys.executable)" >nul 2>&1
-        if !errorlevel! equ 0 (
-            set "PY_EXE=%%~P"
+:: 1. Check standard PATH and py launcher
+python -c "import sys; assert sys.version_info >= (3, 8)" >nul 2>&1
+if %errorlevel% equ 0 set "PY_EXE=python"
+
+if not defined PY_EXE (
+    py -3 -c "import sys; assert sys.version_info >= (3, 8)" >nul 2>&1
+    if !errorlevel! equ 0 set "PY_EXE=py -3"
+)
+
+:: 2. Scan common Python installation directories with wildcards
+if not defined PY_EXE (
+    for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
+        if not defined PY_EXE if exist "%%D\python.exe" (
+            "%%D\python.exe" -c "import sys" >nul 2>&1
+            if !errorlevel! equ 0 set "PY_EXE="%%D\python.exe""
         )
     )
 )
 
-:: Special check for quoted full paths with spaces
 if not defined PY_EXE (
-    if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
-        "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" -c "import sys" >nul 2>&1
-        if !errorlevel! equ 0 set "PY_EXE="%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
-    )
-)
-if not defined PY_EXE (
-    if exist "C:\Program Files\Python312\python.exe" (
-        "C:\Program Files\Python312\python.exe" -c "import sys" >nul 2>&1
-        if !errorlevel! equ 0 set "PY_EXE="C:\Program Files\Python312\python.exe""
+    for /d %%D in ("C:\Program Files\Python*") do (
+        if not defined PY_EXE if exist "%%D\python.exe" (
+            "%%D\python.exe" -c "import sys" >nul 2>&1
+            if !errorlevel! equ 0 set "PY_EXE="%%D\python.exe""
+        )
     )
 )
 
+if not defined PY_EXE (
+    for /d %%D in ("C:\Python*") do (
+        if not defined PY_EXE if exist "%%D\python.exe" (
+            "%%D\python.exe" -c "import sys" >nul 2>&1
+            if !errorlevel! equ 0 set "PY_EXE="%%D\python.exe""
+        )
+    )
+)
+
+:: 3. Deep search in %LOCALAPPDATA% (for winget/custom locations)
+if not defined PY_EXE (
+    for /f "delims=" %%F in ('where /r "%LOCALAPPDATA%" python.exe 2^>nul') do (
+        if not defined PY_EXE (
+            echo %%F | findstr /i "WindowsApps" >nul
+            if !errorlevel! neq 0 (
+                "%%F" -c "import sys" >nul 2>&1
+                if !errorlevel! equ 0 set "PY_EXE="%%F""
+            )
+        )
+    )
+)
+
+:: 4. If still not found, install via winget (machine-wide or user)
 if not defined PY_EXE (
     echo [Info] Python not found! Attempting to install Python 3.12 via winget...
     winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
     if !errorlevel! neq 0 (
         echo [Error] Auto install failed. Please manually install Python 3.12+ from:
         echo         https://www.python.org/downloads/
-        echo         (Make sure to check "Add Python to PATH" during installation)
         pause
         exit /b 1
     )
-    :: Check if installed immediately after winget
-    if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
-        set "PY_EXE="%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
-    ) else (
-        echo [Success] Python installed! Please reboot or re-login Windows if it still cannot be found.
+    for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python*" "C:\Program Files\Python*") do (
+        if not defined PY_EXE if exist "%%D\python.exe" set "PY_EXE="%%D\python.exe""
+    )
+    if not defined PY_EXE (
+        echo [Warning] Python was installed, but path could not be auto-detected.
+        echo           Please install Python manually and check "Add Python to PATH".
         pause
-        exit /b 0
+        exit /b 1
     )
 )
 
@@ -64,7 +82,7 @@ echo [1/3] Detected Python executable: %PY_EXE%
 %PY_EXE% --version
 echo.
 
-:: Add Python directory to current session PATH and ensure user PATH includes it
+:: Add Python directory to current session PATH
 for /f "delims=" %%I in ('%PY_EXE% -c "import os, sys; print(os.path.dirname(sys.executable))"') do set "PY_DIR=%%I"
 set "PATH=%PY_DIR%;%PY_DIR%\Scripts;%PATH%"
 
