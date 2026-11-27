@@ -35,12 +35,16 @@ class HousePrice5168Crawler:
 
     def __init__(self, db_client: Optional[TursoClient] = None, timeout: int = 15):
         self.db = db_client or TursoClient()
-        if USE_CURL_CFFI:
-            self.session = requests.Session(impersonate="chrome120")
-        else:
-            self.session = requests.Session()
-            self.session.headers.update(self.DEFAULT_HEADERS)
         self.timeout = timeout
+        self.last_error: Optional[str] = None
+        self.session = self._create_session()
+
+    def _create_session(self):
+        if USE_CURL_CFFI:
+            return requests.Session(impersonate="chrome120")
+        s = requests.Session()
+        s.headers.update(self.DEFAULT_HEADERS)
+        return s
 
     @staticmethod
     def extract_account_info(input_str: str) -> Tuple[str, str]:
@@ -77,12 +81,16 @@ class HousePrice5168Crawler:
         raise ValueError(f"無法解析 5168 店鋪代號或網址: {input_str}")
 
     def fetch_all_houses(self, account: str, account_type: str = "agent") -> List[Dict[str, Any]]:
+        self.last_error = None
         url = self.BASE_SEARCH_URL.format(account=account, type=account_type)
+        shop_page_url = f"https://realtor.houseprice.tw/{account_type}/buy/{account}/"
+        # 當使用 curl_cffi 時交由 impersonate 自動生成與 TLS 指紋一致的 User-Agent，避免衝突觸發 WAF
         headers = {
-            "Referer": f"https://realtor.houseprice.tw/{account_type}/buy/{account}/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Referer": shop_page_url,
             "Accept": "application/json, text/plain, */*",
         }
+        if not USE_CURL_CFFI:
+            headers["User-Agent"] = self.DEFAULT_HEADERS["User-Agent"]
 
         all_raw_cases: List[Dict[str, Any]] = []
         page = 1
@@ -91,32 +99,59 @@ class HousePrice5168Crawler:
 
         print(f"[*] [5168 API] 開始抓取 {account_type} ({account}) 物件清單 (curl_cffi={USE_CURL_CFFI})...")
 
+        # 預熱店鋪主頁以取得合法 Session Cookie (降低海外機房 IP 直接請求 API 被擋機率)
+        try:
+            self.session.get(shop_page_url, timeout=10)
+        except Exception:
+            pass
+
         while page <= total_pages:
-            try:
-                resp = self.session.get(url, headers=headers, params={"p": page}, timeout=self.timeout)
-                if resp.status_code != 200:
-                    print(f"[!] 5168 第 {page} 頁請求失敗 (HTTP {resp.status_code}): {resp.text[:150]}")
+            page_success = False
+            for attempt in range(1, 4):
+                try:
+                    resp = self.session.get(url, headers=headers, params={"p": page}, timeout=self.timeout)
+                    if resp.status_code != 200:
+                        self.last_error = f"HTTP {resp.status_code}"
+                        print(f"[!] 5168 第 {page} 頁請求失敗 (HTTP {resp.status_code}, 嘗試 {attempt}/3): {resp.text[:120]}")
+                        if attempt < 3:
+                            if attempt == 1:
+                                self.session = self._create_session()
+                                try:
+                                    self.session.get(shop_page_url, timeout=10)
+                                except Exception:
+                                    pass
+                            time.sleep(1.5 * attempt)
+                            continue
+                        break
+
+                    data = resp.json()
+                    page_info = data.get("page", {})
+                    total_items = page_info.get("totalItemCount", 0)
+                    total_pages = page_info.get("totalPageCount", 1)
+
+                    raw_cases = data.get("caseInfo", [])
+                    if not raw_cases:
+                        page_success = True
+                        break
+
+                    all_raw_cases.extend(raw_cases)
+                    print(f"[+] 5168 第 {page}/{total_pages} 頁抓取成功，累計 {len(all_raw_cases)}/{total_items} 筆")
+                    page_success = True
                     break
 
-                data = resp.json()
-                page_info = data.get("page", {})
-                total_items = page_info.get("totalItemCount", 0)
-                total_pages = page_info.get("totalPageCount", 1)
+                except Exception as e:
+                    self.last_error = str(e)
+                    print(f"[!] 5168 抓取第 {page} 頁異常 (嘗試 {attempt}/3): {e}")
+                    if attempt < 3:
+                        if attempt == 1:
+                            self.session = self._create_session()
+                        time.sleep(1.5 * attempt)
 
-                raw_cases = data.get("caseInfo", [])
-                if not raw_cases:
-                    break
-
-                all_raw_cases.extend(raw_cases)
-                print(f"[+] 5168 第 {page}/{total_pages} 頁抓取成功，累計 {len(all_raw_cases)}/{total_items} 筆")
-
-                page += 1
-                if page <= total_pages:
-                    time.sleep(0.3)
-
-            except Exception as e:
-                print(f"[!] 5168 抓取第 {page} 頁異常: {e}")
+            if not page_success or (page >= total_pages) or (not data.get("caseInfo")):
                 break
+
+            page += 1
+            time.sleep(0.3)
 
         print(f"[OK] 5168 抓取完成！共收集 {len(all_raw_cases)} 筆原始在庫物件 (預期 {total_items} 筆)")
         
@@ -136,15 +171,34 @@ class HousePrice5168Crawler:
         """
         ssr_url = f"https://realtor.houseprice.tw/{account_type}/buy/{account}/"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
-        try:
-            print(f"[*] [5168 SSR] 嘗試從前端 Nuxt SSR ({ssr_url}) 提取資料...")
-            resp = self.session.get(ssr_url, headers=headers, timeout=self.timeout)
-            if resp.status_code != 200:
+        if not USE_CURL_CFFI:
+            headers["User-Agent"] = self.DEFAULT_HEADERS["User-Agent"]
+
+        resp = None
+        for attempt in range(1, 3):
+            try:
+                print(f"[*] [5168 SSR] 嘗試從前端 Nuxt SSR ({ssr_url}) 提取資料 (嘗試 {attempt}/2)...")
+                resp = self.session.get(ssr_url, headers=headers, timeout=self.timeout)
+                if resp.status_code == 200:
+                    break
+                self.last_error = f"SSR HTTP {resp.status_code}"
                 print(f"[!] 5168 SSR 頁面請求失敗 (HTTP {resp.status_code})")
-                return []
+                if attempt < 2:
+                    self.session = self._create_session()
+                    time.sleep(1.5)
+            except Exception as e:
+                self.last_error = str(e)
+                print(f"[!] 5168 SSR 請求異常 (嘗試 {attempt}/2): {e}")
+                if attempt < 2:
+                    self.session = self._create_session()
+                    time.sleep(1.5)
+
+        if not resp or resp.status_code != 200:
+            return []
+
+        try:
 
             m = re.search(r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>(.*?)</script>', resp.text, re.DOTALL)
             if not m:

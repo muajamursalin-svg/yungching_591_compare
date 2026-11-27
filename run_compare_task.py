@@ -370,7 +370,11 @@ def main():
     target_shop_url = shop_url or full_shop_url
 
     if not std_houses:
-        err_msg = f"⚠️ 無法取得【{platform}】店鋪庫存資料（店鋪代號: {shop_id}）。\n\n可能原因：該店鋪目前無在售物件，或平台連線異常，請稍後再試。"
+        last_err = getattr(crawler_5168, "last_error", None) if platform == "5168" else None
+        if last_err:
+            err_msg = f"⚠️ 無法取得【{platform}】店鋪庫存資料（店鋪代號: {shop_id}）。\n\n原因：平台連線受阻或異常 ({last_err})，請稍後再試。"
+        else:
+            err_msg = f"⚠️ 無法取得【{platform}】店鋪庫存資料（店鋪代號: {shop_id}）。\n\n可能原因：該店鋪目前無在售物件，或平台連線異常，請稍後再試。"
         print(f"[Warn] {err_msg}")
         send_line_push_notification(user_id, err_msg, db_client=db)
         release_user_query_lock(db, user_id)

@@ -382,12 +382,12 @@ class InventoryComparator:
                 to_f2 = int(y.get("to_floor") or 0)
                 up_f2 = int(y.get("up_floor") or 0)
                 to_f1 = int(h.get("to_floor") or f1 or 0)
+                effective_to_f2 = to_f2 if to_f2 != 0 else f2
 
                 # 樓層比對
                 if not floor_tolerance:
                     # 嚴格比對 (大樓公寓相容單一樓層與樓中樓區間；透天整棟相容 99、1、-1、0 或 to_floor == up_floor)
                     if f1 > 0 and f1 != 99:
-                        effective_to_f2 = to_f2 if to_f2 > 0 else f2
                         floor_match = (
                             f1 == f2 or 
                             to_f1 == effective_to_f2 or 
@@ -402,7 +402,6 @@ class InventoryComparator:
                             continue
                 else:
                     # 樓層容錯比對 (Pass 2)：排除已經相符者
-                    effective_to_f2 = to_f2 if to_f2 > 0 else f2
                     is_same_floor = (
                         (f1 == f2 and to_f1 == effective_to_f2) or
                         (f1 == 99 and (f2 in [-1, 0, 1, 99] or to_f2 == up_f2))
@@ -594,7 +593,7 @@ class InventoryComparator:
             # 樓層完全一致者額外加分 (區間僅交集重疊者保留機會但不加滿分)
             f2 = int(y.get("from_floor") or 0)
             to_f2 = int(y.get("to_floor") or 0)
-            effective_to_f2 = to_f2 if to_f2 > 0 else f2
+            effective_to_f2 = to_f2 if to_f2 != 0 else f2
             to_f1 = int(h.get("to_floor") or f1 or 0)
             if f1 == f2 and to_f1 == effective_to_f2:
                 score += 15.0
@@ -755,7 +754,7 @@ class InventoryComparator:
         has_floor_range_diff = False
         f2 = int(best_y.get("from_floor") or 0)
         to_f2 = int(best_y.get("to_floor") or 0)
-        effective_to_f2 = to_f2 if to_f2 > 0 else f2
+        effective_to_f2 = to_f2 if to_f2 != 0 else f2
         to_f1 = int(h.get("to_floor") or f1 or 0)
 
         if f1 > 0 and f1 != 99 and f2 != 99:
