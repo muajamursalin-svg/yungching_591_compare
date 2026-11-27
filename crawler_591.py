@@ -211,8 +211,7 @@ class T591ShopCrawler:
                 except ValueError:
                     pass
 
-            fl = int(h.get("floor")) if str(h.get("floor", "")).isdigit() else 0
-            allfl = int(h.get("allfloor")) if str(h.get("allfloor", "")).isdigit() else 0
+            fl, to_fl, allfl = T591ShopCrawler.parse_floor_range(h)
             room = int(h.get("room")) if str(h.get("room", "")).isdigit() else 0
             shape = int(h.get("shape")) if str(h.get("shape", "")).isdigit() else 0
 
@@ -253,6 +252,24 @@ class T591ShopCrawler:
             self.db.batch(batch_stmts)
 
     @staticmethod
+    def parse_floor_range(h: Dict[str, Any]):
+        """解析 591 樓層與樓中樓區間 (floor, floor2, floorInfo, allfloor) -> (fl, to_fl, allfl)"""
+        fl = int(h.get("floor")) if str(h.get("floor", "")).isdigit() else 0
+        to_fl = int(h.get("floor2")) if str(h.get("floor2", "")).strip().isdigit() else 0
+        allfl = int(h.get("allfloor")) if str(h.get("allfloor", "")).isdigit() else 0
+        floor_info = str(h.get("floorInfo") or "")
+        if floor_info:
+            f_range_m = re.search(r'(\d+)\s*[-~～]\s*(\d+)', floor_info)
+            if f_range_m:
+                if fl == 0:
+                    fl = int(f_range_m.group(1))
+                if to_fl == 0:
+                    to_fl = int(f_range_m.group(2))
+        if to_fl <= fl:
+            to_fl = 0
+        return fl, to_fl, allfl
+
+    @staticmethod
     def to_standard_houses(houses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         將 591 原始案件資料轉換為跨平台通用 StandardHouse 規格
@@ -261,8 +278,7 @@ class T591ShopCrawler:
         for h in houses:
             hid = str(h.get("id"))
             p_val = T591ShopCrawler.parse_price(h.get("price", ""))
-            fl = int(h.get("floor")) if str(h.get("floor", "")).isdigit() else 0
-            allfl = int(h.get("allfloor")) if str(h.get("allfloor", "")).isdigit() else 0
+            fl, to_fl, allfl = T591ShopCrawler.parse_floor_range(h)
             room = int(h.get("room")) if str(h.get("room", "")).isdigit() else 0
             raw_age = str(h.get("houseage", "")).strip()
             age_val = float(raw_age) if raw_age.replace(".", "").isdigit() else 0.0
@@ -303,6 +319,7 @@ class T591ShopCrawler:
                 "is_land": is_land,
                 "main_area": float(h.get("mainarea") or 0.0) if h.get("mainarea") else None,
                 "floor": fl,
+                "to_floor": to_fl,
                 "all_floor": allfl,
                 "house_age": age_val,
                 "room": room,
