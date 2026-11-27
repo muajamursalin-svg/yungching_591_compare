@@ -21,6 +21,9 @@
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    if (action === "ping") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "ok", version: "2026-11-27-reply-report-v1" })).setMimeType(ContentService.MimeType.JSON);
+    }
     const scriptProps = PropertiesService.getScriptProperties();
 
     if (action === "get_ads") {
@@ -285,7 +288,7 @@ function doPost(e) {
         // 0. 讀取使用者既有的店鋪儲存資訊
         let userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
 
-        if (userMsg === "領取最新報告" || userMsg === "最新報告" || userMsg === "📥 領取最新報告") {
+        if (userMsg === "領取最新報告" || userMsg === "最新報告" || userMsg === "📥 領取最新報告" || userMsg === "領取報告") {
           handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, userId, liffUrl);
           continue;
         }
@@ -1329,7 +1332,25 @@ function replyLineMessage(token, replyToken, text, userShops, liffUrl, customBut
   };
 
   const res = UrlFetchApp.fetch(url, options);
-  console.log("LINE Reply Status: " + res.getResponseCode());
+  const code = res.getResponseCode();
+  console.log("LINE Reply Status: " + code);
+  if (code >= 400) {
+    console.error("LINE Reply Error Body: " + res.getContentText());
+    const fallbackPayload = {
+      replyToken: replyToken,
+      messages: [{ type: "text", text: String(text || "系統回覆").substring(0, 4900) }]
+    };
+    const fbRes = UrlFetchApp.fetch(url, {
+      method: "post",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      payload: JSON.stringify(fallbackPayload),
+      muteHttpExceptions: true
+    });
+    console.log("LINE Fallback Reply Status: " + fbRes.getResponseCode());
+  }
 }
 
 // ───────────────────────────────────────────────
