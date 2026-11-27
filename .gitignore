@@ -6,3 +6,9 @@ venv/
 database.sqlite
 *.log
 .DS_Store
+
+# GitHub Runner 執行檔與單機憑證 (禁止上傳至公開倉庫)
+actions-runner/
+runner/*.zip
+runner/.credentials*
+runner/.runner*
