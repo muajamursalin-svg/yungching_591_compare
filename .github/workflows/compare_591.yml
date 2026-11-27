@@ -21,8 +21,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          pip install -q requests curl_cffi
+
       - name: Run Multi-Platform Crawler & Comparator
-        shell: powershell
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
@@ -33,12 +41,4 @@ jobs:
           EVENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
           WORKFLOW_INPUTS: ${{ toJson(github.event.inputs) }}
         run: |
-          $py = (Get-Command python -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike '*WindowsApps*' } | Select-Object -First 1 -ExpandProperty Source)
-          if (-not $py) {
-            $py = Get-ChildItem -Path "C:\Program Files\Python*", "C:\Python*", "C:\Users\*\AppData\Local\Programs\Python\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $py) { throw "Python executable not found on this server!" }
-          Write-Host "Using Python: $py"
-          & $py -c "import requests, curl_cffi" 2>$null
-          if ($LASTEXITCODE -ne 0) { & $py -m pip install -q -r runner/requirements.txt }
-          & $py run_compare_task.py
+          python run_compare_task.py
