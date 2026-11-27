@@ -118,6 +118,30 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 處理爬蟲中繼代理請求 (當 GitHub Actions 海外機房 IP 被 WAF 403 阻擋時使用)
+    if (postData && postData.action === "proxy_fetch" && postData.url) {
+      const targetUrl = String(postData.url);
+      const allowedDomains = ["houseprice.tw", "591.com.tw", "rakuya.com.tw", "yungching.com.tw"];
+      const isAllowed = allowedDomains.some(d => targetUrl.includes(d));
+      if (!isAllowed) {
+        return ContentService.createTextOutput(JSON.stringify({ status: 403, error: "Domain not allowed" })).setMimeType(ContentService.MimeType.JSON);
+      }
+      const fetchHeaders = postData.headers || {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/html, */*"
+      };
+      const proxyRes = UrlFetchApp.fetch(targetUrl, {
+        method: "get",
+        headers: fetchHeaders,
+        muteHttpExceptions: true,
+        followRedirects: true
+      });
+      return ContentService.createTextOutput(JSON.stringify({
+        status: proxyRes.getResponseCode(),
+        body: proxyRes.getContentText()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     const events = postData.events;
     if (!events || events.length === 0) {
       return ContentService.createTextOutput("OK");

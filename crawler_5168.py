@@ -5,6 +5,7 @@ from __future__ import annotations
 完全不使用任何 DOM 解析，直接對接 5168 Web Service
 """
 
+import os
 import re
 import time
 import json
@@ -28,8 +29,11 @@ class HousePrice5168Crawler:
     BASE_SEARCH_URL = "https://buy.houseprice.tw/ws/BuyCaseList/{account}/{type}/Search/"
     BASE_OPTION_URL = "https://buy.houseprice.tw/ws/BuyCaseListOption/{account}/{type}/CityOption"
     
+    DEFAULT_GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbxiytIWcthzj0tvttt9Jxvw7XwIqDW42upWjrJXcOKWZhnX8cY8H8pWQh5mDynaonhn/exec"
+    IMPERSONATE_PROFILES = ["chrome124", "chrome120", "safari15_5"]
+
     DEFAULT_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
     }
 
@@ -37,14 +41,41 @@ class HousePrice5168Crawler:
         self.db = db_client or TursoClient()
         self.timeout = timeout
         self.last_error: Optional[str] = None
-        self.session = self._create_session()
+        self.gas_proxy_url = os.environ.get("GAS_PROXY_URL") or self.DEFAULT_GAS_PROXY_URL
+        self.session = self._create_session(0)
 
-    def _create_session(self):
+    def _create_session(self, profile_idx: int = 0):
         if USE_CURL_CFFI:
-            return requests.Session(impersonate="chrome120")
+            prof = self.IMPERSONATE_PROFILES[profile_idx % len(self.IMPERSONATE_PROFILES)]
+            return requests.Session(impersonate=prof)
         s = requests.Session()
         s.headers.update(self.DEFAULT_HEADERS)
         return s
+
+    def _fetch_via_gas_proxy(self, target_url: str, headers: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
+        """透過 Google Apps Script 中繼代理發送 GET 請求，繞過海外機房 IP 封鎖"""
+        if not self.gas_proxy_url:
+            return 0, ""
+        try:
+            payload = {
+                "action": "proxy_fetch",
+                "url": target_url,
+                "headers": headers or self.DEFAULT_HEADERS
+            }
+            resp = self.session.post(
+                self.gas_proxy_url,
+                json=payload,
+                timeout=max(self.timeout, 25),
+                allow_redirects=True
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if "status" in data and "body" in data:
+                    return int(data["status"]), str(data["body"])
+                return 0, f"GAS Proxy 格式異常 (請確認 GAS 已更新部署): {resp.text[:120]}"
+            return resp.status_code, resp.text[:150]
+        except Exception as e:
+            return 0, str(e)
 
     @staticmethod
     def extract_account_info(input_str: str) -> Tuple[str, str]:
@@ -105,17 +136,34 @@ class HousePrice5168Crawler:
         except Exception:
             pass
 
+        use_gas_proxy = False
         while page <= total_pages:
             page_success = False
+            data = {}
             for attempt in range(1, 4):
                 try:
-                    resp = self.session.get(url, headers=headers, params={"p": page}, timeout=self.timeout)
-                    if resp.status_code != 200:
-                        self.last_error = f"HTTP {resp.status_code}"
-                        print(f"[!] 5168 第 {page} 頁請求失敗 (HTTP {resp.status_code}, 嘗試 {attempt}/3): {resp.text[:120]}")
+                    if not use_gas_proxy:
+                        resp = self.session.get(url, headers=headers, params={"p": page}, timeout=self.timeout)
+                        status_code, resp_text = resp.status_code, resp.text
+                    else:
+                        gas_headers = {
+                            "Referer": shop_page_url,
+                            "User-Agent": self.DEFAULT_HEADERS["User-Agent"],
+                            "Accept": "application/json, text/plain, */*",
+                        }
+                        status_code, resp_text = self._fetch_via_gas_proxy(f"{url}?p={page}", headers=gas_headers)
+
+                    if status_code != 200:
+                        self.last_error = f"HTTP {status_code}"
+                        print(f"[!] 5168 第 {page} 頁請求失敗 ({'GAS代理' if use_gas_proxy else '直連'} HTTP {status_code}, 嘗試 {attempt}/3): {resp_text[:120]}")
+                        # 若直連遭遇 403 阻擋，且未試過 GAS 中繼，立刻切換為 GAS 中繼代理
+                        if not use_gas_proxy and status_code == 403 and self.gas_proxy_url:
+                            print("[*] 偵測到 5168 直連遭 403 攔截，自動切換透過 GAS 中繼代理轉發...")
+                            use_gas_proxy = True
+                            continue
                         if attempt < 3:
-                            if attempt == 1:
-                                self.session = self._create_session()
+                            if not use_gas_proxy:
+                                self.session = self._create_session(attempt)
                                 try:
                                     self.session.get(shop_page_url, timeout=10)
                                 except Exception:
@@ -124,7 +172,7 @@ class HousePrice5168Crawler:
                             continue
                         break
 
-                    data = resp.json()
+                    data = json.loads(resp_text)
                     page_info = data.get("page", {})
                     total_items = page_info.get("totalItemCount", 0)
                     total_pages = page_info.get("totalPageCount", 1)
@@ -135,7 +183,8 @@ class HousePrice5168Crawler:
                         break
 
                     all_raw_cases.extend(raw_cases)
-                    print(f"[+] 5168 第 {page}/{total_pages} 頁抓取成功，累計 {len(all_raw_cases)}/{total_items} 筆")
+                    via_label = "(via GAS)" if use_gas_proxy else ""
+                    print(f"[+] 5168 第 {page}/{total_pages} 頁抓取成功 {via_label}，累計 {len(all_raw_cases)}/{total_items} 筆")
                     page_success = True
                     break
 
@@ -143,8 +192,8 @@ class HousePrice5168Crawler:
                     self.last_error = str(e)
                     print(f"[!] 5168 抓取第 {page} 頁異常 (嘗試 {attempt}/3): {e}")
                     if attempt < 3:
-                        if attempt == 1:
-                            self.session = self._create_session()
+                        if not use_gas_proxy:
+                            self.session = self._create_session(attempt)
                         time.sleep(1.5 * attempt)
 
             if not page_success or (page >= total_pages) or (not data.get("caseInfo")):
@@ -176,31 +225,40 @@ class HousePrice5168Crawler:
         if not USE_CURL_CFFI:
             headers["User-Agent"] = self.DEFAULT_HEADERS["User-Agent"]
 
-        resp = None
+        html_text = ""
         for attempt in range(1, 3):
             try:
                 print(f"[*] [5168 SSR] 嘗試從前端 Nuxt SSR ({ssr_url}) 提取資料 (嘗試 {attempt}/2)...")
                 resp = self.session.get(ssr_url, headers=headers, timeout=self.timeout)
                 if resp.status_code == 200:
+                    html_text = resp.text
                     break
                 self.last_error = f"SSR HTTP {resp.status_code}"
                 print(f"[!] 5168 SSR 頁面請求失敗 (HTTP {resp.status_code})")
                 if attempt < 2:
-                    self.session = self._create_session()
+                    self.session = self._create_session(attempt)
                     time.sleep(1.5)
             except Exception as e:
                 self.last_error = str(e)
                 print(f"[!] 5168 SSR 請求異常 (嘗試 {attempt}/2): {e}")
                 if attempt < 2:
-                    self.session = self._create_session()
+                    self.session = self._create_session(attempt)
                     time.sleep(1.5)
 
-        if not resp or resp.status_code != 200:
+        if not html_text and self.gas_proxy_url:
+            print("[*] [5168 SSR] 直連失敗，嘗試透過 GAS 中繼代理抓取 SSR 頁面...")
+            g_status, g_body = self._fetch_via_gas_proxy(ssr_url, headers={"User-Agent": self.DEFAULT_HEADERS["User-Agent"]})
+            if g_status == 200 and g_body:
+                html_text = g_body
+                self.last_error = None
+            elif g_status:
+                self.last_error = f"SSR GAS Proxy HTTP {g_status}"
+
+        if not html_text:
             return []
 
         try:
-
-            m = re.search(r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>(.*?)</script>', resp.text, re.DOTALL)
+            m = re.search(r'<script[^>]*id=["\']__NUXT_DATA__["\'][^>]*>(.*?)</script>', html_text, re.DOTALL)
             if not m:
                 print(f"[!] 5168 SSR 頁面中未找到 __NUXT_DATA__ 標籤")
                 return []
