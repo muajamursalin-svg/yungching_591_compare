@@ -184,6 +184,7 @@ class InventoryComparator:
         d1 = (h.get("district") or "").strip()
         f1 = int(h.get("floor") or 0)
         a1 = float(h.get("reg_area") or 0.0)
+        ma1 = float(h.get("main_area") or 0.0)
         p1 = float(h.get("price") or 0.0)
         allf1 = int(h.get("all_floor") or 0)
         age1 = float(h.get("house_age") or 0.0)
@@ -419,10 +420,13 @@ class InventoryComparator:
                             continue
 
                 # 建物登記坪數容許誤差比對：
-                # 若為「同縣市/區域/路名(或社區)/同開價/同樓層/同總高」之強特徵候選，容許建坪誤差放寬至 5.0 坪 (留至第二階段標註為規格不符)
-                # 其他一般物件仍嚴格限制 <= 1.5 坪
+                # 1. 若為「同縣市/區域/路名(或社區)/同開價/同樓層/同總高」且「主建物坪數高度吻合 (<= 1.5坪)」之強特徵候選，
+                #    放寬總建坪容許至 30.0 坪 (解決含車位與否造成的 10~25 坪落差，留至第二階段標註為規格不符)
+                # 2. 其餘強特徵候選放寬至 5.0 坪；一般物件嚴格限制 <= 1.5 坪
                 a2 = float(y.get("reg_area") or 0.0)
+                ma2 = float(y.get("main_area") or 0.0)
                 diff_area = abs(a1 - a2)
+                diff_main_area = abs(ma1 - ma2) if (ma1 > 0 and ma2 > 0) else 999.0
                 p2 = float(y.get("price") or 0.0)
                 diff_p = abs(p1 - p2) if (p1 > 0 and p2 > 0) else 999.0
                 diff_allf = abs(allf1 - up_f2) if (allf1 > 0 and up_f2 > 0) else 0
@@ -433,8 +437,9 @@ class InventoryComparator:
                 )
                 is_exact_all_floor = (diff_allf <= 1)
                 is_strong_feature = (comm_match or st_match) and is_exact_floor and (diff_p <= 1.0) and is_exact_all_floor
+                is_main_area_match = (ma1 > 0 and ma2 > 0 and diff_main_area <= 1.5)
 
-                max_diff_area = 5.0 if is_strong_feature else 1.5
+                max_diff_area = 30.0 if (is_strong_feature and is_main_area_match) else (5.0 if is_strong_feature else 1.5)
                 if diff_area > max_diff_area:
                     continue
 
