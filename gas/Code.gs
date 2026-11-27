@@ -171,6 +171,11 @@ function doPost(e) {
         const shopUrl = decodeURIComponent(params.url || "");
         const shopId = params.shop_id || "";
 
+        if (action === "get_latest_report") {
+          handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, userId, liffUrl);
+          continue;
+        }
+
         if (action === "update_shop") {
           // 檢查使用者當前是否已有「其他」比對任務執行中 (防止重複併發查詢)
           const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
@@ -195,22 +200,22 @@ function doPost(e) {
           acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId);
           const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
           if (!ghaOk) releaseUserQueryLock(tursoUrl, tursoToken, userId);
-          // 3. 取得最新按鈕並回覆
+          // 3. 取得排隊狀態與最新按鈕並回覆
           const latestShops = getUserSavedShops(tursoUrl, tursoToken, userId);
-          const qr = buildQuickReply(latestShops);
           const count = getShopCount(latestShops, platform);
           const userLabel = (latestShops && latestShops.user_name) ? latestShops.user_name : (userName || "同仁");
+          const queueMsg = ghaOk ? getQueueStatusMessage(tursoUrl, tursoToken, userId) : "";
 
           replyLineMessage(lineToken, replyToken,
-            `✅ 已為您更新 ${platform} 預設店鋪為新網址！\n\n` +
+            `✅ 已為您更新 ${platform} 預設店鋪並啟動比對！\n\n` +
             `👤 使用者: ${userLabel}\n` +
             `📍 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
-            `⏳ 系統現正同步最新庫存並進行多維特徵比對...\n\n` +
-            `比對完成後將會主動發送推播報告通知您！`,
-            qr,
+            (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
+            `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
             null,
             null,
+            [getLatestReportBtn()],
             buildPromoExtraMessages(getTotalShopCount(latestShops), liffUrl)
           );
           continue;
@@ -221,13 +226,15 @@ function doPost(e) {
           const isSamePendingLock = (userLock && userLock.is_locked && userLock.platform === platform && userLock.shop_id === shopId);
           if (userLock && userLock.is_locked && !isSamePendingLock) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
-            const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
-            const qr = buildQuickReply(userShops);
+            const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您處理【${platName}】店鋪比對（約需 30~45 秒），完成後將自動推播報告給您。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
-              qr
+              `系統正為您處理【${platName}】店鋪比對。\n` +
+              (queueMsg ? `${queueMsg}\n\n` : `\n`) +
+              `為確保資料正確性，一次僅能查詢一個平台，請稍候並點擊下方按鈕領取報告。`,
+              null,
+              null,
+              [getLatestReportBtn()]
             );
             continue;
           }
@@ -239,19 +246,20 @@ function doPost(e) {
           const ghaOk = triggerGitHubActions(githubRepo, githubToken, shopId, shopUrl, userId, platform);
           if (!ghaOk) releaseUserQueryLock(tursoUrl, tursoToken, userId);
           const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
-          const qr = buildQuickReply(userShops);
           const count = getShopCount(userShops, platform);
           const userLabel = (userShops && userShops.user_name) ? userShops.user_name : (userName || "同仁");
+          const queueMsg = ghaOk ? getQueueStatusMessage(tursoUrl, tursoToken, userId) : "";
 
           replyLineMessage(lineToken, replyToken,
-            `⚡ 收到！本次為【單次比對】（未變更您的預設店鋪）。\n\n` +
+            `⚡ 收到！已啟動【單次比對】（未變更預設店鋪）。\n\n` +
             `👤 使用者: ${userLabel}\n` +
             `📍 ${platform} 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
-            `⏳ 系統現正進行庫存比對，完成後將推播報告通知您！`,
-            qr,
+            (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
+            `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
             null,
             null,
+            [getLatestReportBtn()],
             buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
           );
           continue;
@@ -276,6 +284,11 @@ function doPost(e) {
 
         // 0. 讀取使用者既有的店鋪儲存資訊
         let userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+
+        if (userMsg === "領取最新報告" || userMsg === "最新報告" || userMsg === "📥 領取最新報告") {
+          handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, userId, liffUrl);
+          continue;
+        }
 
         // 1. 偵測使用者是否點擊了一鍵快捷按鈕 (例如: "查詢 591 庫存", "查詢 5168 庫存", "查詢 樂屋網 庫存")
         const isQuick591 = (userMsg === "查詢 591 庫存" || userMsg === "查 591");
@@ -310,12 +323,15 @@ function doPost(e) {
           const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
           if (userLock && userLock.is_locked) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
+            const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您處理【${platName}】店鋪比對。\n\n` +
-              `若上方有出現確認卡片，請先點選【更新預設】或【單次比對】（或點取消）。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
-              qr
+              `系統正為您處理【${platName} (${userLock.shop_id})】店鋪比對。\n` +
+              (queueMsg ? `${queueMsg}\n\n` : `\n`) +
+              `完成後可點擊下方【📥 領取最新報告】查看結果！`,
+              null,
+              null,
+              [getLatestReportBtn()]
             );
             continue;
           }
@@ -361,16 +377,17 @@ function doPost(e) {
           acquireUserQueryLock(tursoUrl, tursoToken, userId, reqPlatform, shopId);
           const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, targetUrl, userId, reqPlatform);
           if (ghaSuccess) {
+            const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken, 
               `✅ 收到！已啟動 ${reqPlatform} 庫存比對任務\n\n` +
               `👤 使用者: ${userLabel}\n` +
               `📍 店鋪代號: ${shopId}\n` +
               `📈 個人累計查詢: 第 ${newCnt} 次\n` +
-              `⏳ 系統正在同步 ${reqPlatform} 與永慶分店庫存並進行比對（約需 30~45 秒）...\n\n` +
-              `比對完成後將會主動推播報告給您！`,
-              qr,
+              (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
+              `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
               null,
               null,
+              [getLatestReportBtn()],
               buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
             );
           } else {
@@ -411,13 +428,15 @@ function doPost(e) {
           const userLock = checkUserQueryLock(tursoUrl, tursoToken, userId);
           if (userLock && userLock.is_locked) {
             const platName = userLock.platform === "5168" ? "5168" : (userLock.platform === "rakuya" ? "樂屋網" : "591");
-            const qr = buildQuickReply(userShops);
+            const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken,
               `⏳ 目前查詢中 請稍後\n\n` +
-              `系統正為您處理【${platName}】店鋪比對。\n\n` +
-              `若上方有出現確認卡片，請先點選【更新預設】或【單次比對】（或點取消）。\n\n` +
-              `為確保資料正確性，一次僅能查詢一個平台，請待本次比對完成或取消後再進行下次查詢。`,
-              qr
+              `系統正為您處理【${platName} (${userLock.shop_id})】店鋪比對。\n` +
+              (queueMsg ? `${queueMsg}\n\n` : `\n`) +
+              `完成後可點擊下方【📥 領取最新報告】查看結果！`,
+              null,
+              null,
+              [getLatestReportBtn()]
             );
             continue;
           }
@@ -527,17 +546,18 @@ function doPost(e) {
           const ghaSuccess = triggerGitHubActions(githubRepo, githubToken, shopId, userMsg, userId, platform);
           if (ghaSuccess) {
             const memoryTip = isFirstTime ? `💡 系統已自動為您記憶此店鋪，未來可直接點選下方按鈕一鍵查詢！\n\n` : "";
+            const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
             replyLineMessage(lineToken, replyToken, 
               `✅ 收到！已成功啟動 ${platform} 庫存比對任務\n\n` +
               `👤 使用者: ${userLabel}\n` +
               `📍 店鋪代號: ${shopId}\n` +
               `📈 個人累計查詢: 第 ${currentCount} 次\n` +
               memoryTip +
-              `⏳ 系統正在同步 ${platform} 與永慶分店庫存並進行多維特徵比對（約需 30~45 秒）...\n\n` +
-              `比對完成後將會主動發送推播報告通知您！`,
-              qr,
+              (queueMsg ? `${queueMsg}\n\n` : ``) +
+              `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
               null,
               null,
+              [getLatestReportBtn()],
               buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl)
             );
           } else {
@@ -815,6 +835,15 @@ function buildQuickReply(userShops) {
   }
 
   if (items.length === 0) return null;
+  items.push({
+    type: "action",
+    action: {
+      type: "postback",
+      label: "📥 領取最新報告",
+      data: "action=get_latest_report",
+      displayText: "領取最新報告"
+    }
+  });
   return { items: items };
 }
 
@@ -1262,7 +1291,7 @@ function replyLineMessage(token, replyToken, text, userShops, liffUrl, customBut
         color = "#0084ff";
       } else if (lbl.indexOf("樂屋網") !== -1) {
         color = "#e60012";
-      } else if (dataStr.indexOf("update_shop") !== -1) {
+      } else if (dataStr.indexOf("update_shop") !== -1 || dataStr.indexOf("get_latest_report") !== -1) {
         color = "#06c755";
       } else if (dataStr.indexOf("once_compare") !== -1) {
         color = "#3b82f6";
@@ -1360,8 +1389,223 @@ function checkUserQueryLock(tursoUrl, tursoToken, userId) {
   return null;
 }
 
+function getLatestReportBtn() {
+  return {
+    style: "primary",
+    color: "#06c755",
+    action: {
+      type: "postback",
+      label: "📥 領取最新報告",
+      data: "action=get_latest_report",
+      displayText: "領取最新報告"
+    }
+  };
+}
+
 /**
- * 取得使用者比對任務鎖定 (標記 is_running = 1)
+ * 查詢目前前方正在排隊或執行的任務與預估庫存筆數
+ */
+function getQueueStatusMessage(tursoUrl, tursoToken, currentUserId) {
+  if (!tursoUrl || !tursoToken) return "";
+  try {
+    const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+    // 撈取目前所有執行中的其他使用者任務 (含當下已抓到的 item_count，以及關聯上次該店鋪的歷史 total_591_count)
+    const sql = `
+      SELECT 
+        q.user_id, q.platform, q.shop_id, q.locked_at, COALESCE(q.item_count, 0) as item_count,
+        (SELECT r.total_591_count FROM compare_reports r WHERE r.shop_id = q.shop_id AND r.platform = q.platform ORDER BY r.created_at DESC LIMIT 1) as hist_count
+      FROM user_query_locks q
+      WHERE q.is_running = 1 AND q.user_id != ?
+      ORDER BY q.locked_at ASC;
+    `;
+    const res = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify({
+        requests: [
+          { type: "execute", stmt: { sql: sql, args: [{ type: "text", value: currentUserId || "" }] } },
+          { type: "close" }
+        ]
+      }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) return "";
+    const data = JSON.parse(res.getContentText());
+    const result = data.results[0]?.response?.result;
+    if (!result || !result.rows || result.rows.length === 0) {
+      return "🟢 目前無人排隊，系統已立即為您處理中！";
+    }
+
+    const cols = result.cols.map(c => c.name);
+    const now = new Date().getTime();
+    const activeTasks = [];
+    result.rows.forEach(r => {
+      const obj = {};
+      cols.forEach((col, idx) => { obj[col] = r[idx].value; });
+      if (obj.locked_at) {
+        const lockedTime = new Date(obj.locked_at.replace(" ", "T") + "+08:00").getTime();
+        // 僅計算 3 分鐘 (180秒) 內的有效進行中任務
+        if ((now - lockedTime) / 1000 <= 180) {
+          activeTasks.push(obj);
+        }
+      }
+    });
+
+    if (activeTasks.length === 0) {
+      return "🟢 目前無人排隊，系統已立即為您處理中！";
+    }
+
+    let totalEstItems = 0;
+    const lines = activeTasks.map((t, i) => {
+      const plat = t.platform === "5168" ? "5168" : (t.platform === "rakuya" ? "樂屋網" : "591");
+      const cnt = parseInt(t.item_count) > 0 ? parseInt(t.item_count) : (parseInt(t.hist_count) || 0);
+      totalEstItems += (cnt > 0 ? cnt : 50);
+      const cntText = cnt > 0 ? `約 ${cnt} 件` : "首次查詢估算中";
+      return `${i + 1}. ${plat} (${t.shop_id})：${cntText}`;
+    });
+
+    const estMin = Math.max(1, Math.ceil(totalEstItems / 90));
+    return `📋 目前前方共有 ${activeTasks.length} 筆查詢 處理／排隊中：\n` +
+           lines.join("\n") +
+           `\n⏱️ 預估需等待約 ${estMin} ~ ${estMin + 1} 分鐘`;
+  } catch (err) {
+    console.warn("getQueueStatusMessage failed: " + err);
+    return "";
+  }
+}
+
+/**
+ * 處理使用者點擊「📥 領取最新報告」 (免費 replyMessage 無限次發送)
+ */
+function handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, userId, liffUrl) {
+  const userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
+  const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
+
+  try {
+    // 1. 先檢查該使用者目前鎖定與狀態
+    const lockSql = "SELECT is_running, platform, shop_id, locked_at, COALESCE(last_status, '') as last_status FROM user_query_locks WHERE user_id = ? LIMIT 1;";
+    const lockRes = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify({
+        requests: [
+          { type: "execute", stmt: { sql: lockSql, args: [{ type: "text", value: userId }] } },
+          { type: "close" }
+        ]
+      }),
+      muteHttpExceptions: true
+    });
+
+    if (lockRes.getResponseCode() === 200) {
+      const lockData = JSON.parse(lockRes.getContentText());
+      const lResult = lockData.results[0]?.response?.result;
+      if (lResult && lResult.rows && lResult.rows.length > 0) {
+        const lCols = lResult.cols.map(c => c.name);
+        const lObj = {};
+        lCols.forEach((col, idx) => { lObj[col] = lResult.rows[0][idx].value; });
+
+        const isRunning = parseInt(lObj.is_running) === 1;
+        let notExpired = false;
+        if (isRunning && lObj.locked_at) {
+          const lockedTime = new Date(lObj.locked_at.replace(" ", "T") + "+08:00").getTime();
+          notExpired = ((new Date().getTime() - lockedTime) / 1000) <= 180;
+        }
+
+        if (isRunning && notExpired) {
+          const platName = lObj.platform === "5168" ? "5168" : (lObj.platform === "rakuya" ? "樂屋網" : "591");
+          const queueMsg = getQueueStatusMessage(tursoUrl, tursoToken, userId);
+          replyLineMessage(lineToken, replyToken,
+            `⏳ 您的【${platName} (${lObj.shop_id})】比對作業仍在處理中！\n\n` +
+            (queueMsg ? `${queueMsg}\n\n` : "") +
+            `請再稍候約 15~30 秒，再點擊下方按鈕領取結果：`,
+            null,
+            null,
+            [getLatestReportBtn()]
+          );
+          return;
+        }
+
+        if (lObj.last_status && lObj.last_status.indexOf("ERROR:") === 0) {
+          const errText = lObj.last_status.substring(6);
+          // 清除本次錯誤狀態避免下次重複顯示
+          UrlFetchApp.fetch(pipelineUrl, {
+            method: "post",
+            headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+            payload: JSON.stringify({
+              requests: [
+                { type: "execute", stmt: { sql: "UPDATE user_query_locks SET last_status = '' WHERE user_id = ?;", args: [{ type: "text", value: userId }] } },
+                { type: "close" }
+              ]
+            }),
+            muteHttpExceptions: true
+          });
+          replyLineMessage(lineToken, replyToken, errText, userShops);
+          return;
+        }
+      }
+    }
+
+    // 2. 撈取該使用者最新完成的一筆比對報告
+    const rptSql = "SELECT * FROM compare_reports WHERE user_id = ? ORDER BY created_at DESC LIMIT 1;";
+    const rptRes = UrlFetchApp.fetch(pipelineUrl, {
+      method: "post",
+      headers: { "Authorization": "Bearer " + tursoToken, "Content-Type": "application/json" },
+      payload: JSON.stringify({
+        requests: [
+          { type: "execute", stmt: { sql: rptSql, args: [{ type: "text", value: userId }] } },
+          { type: "close" }
+        ]
+      }),
+      muteHttpExceptions: true
+    });
+
+    const rptData = JSON.parse(rptRes.getContentText());
+    const rResult = rptData.results[0]?.response?.result;
+    if (!rResult || !rResult.rows || rResult.rows.length === 0) {
+      replyLineMessage(lineToken, replyToken,
+        `ℹ️ 尚無您的比對報告紀錄。\n\n請先貼上 591 / 5168 / 樂屋網店鋪網址開始比對！`,
+        userShops
+      );
+      return;
+    }
+
+    const rCols = rResult.cols.map(c => c.name);
+    const rpt = {};
+    rCols.forEach((col, idx) => { rpt[col] = rResult.rows[0][idx].value; });
+
+    const plat = rpt.platform || "591";
+    const cnt = getShopCount(userShops, plat);
+    const userLabel = (userShops && userShops.user_name) ? userShops.user_name : "同仁";
+    const targetLiff = liffUrl ? `${liffUrl}?report_id=${rpt.report_id}` : "";
+    const summaryText = formatCompareSummaryText(
+      plat,
+      rpt.shop_id,
+      cnt,
+      rpt.total_591_count,
+      rpt.matched_count,
+      rpt.not_found_count,
+      rpt.price_diff_count,
+      rpt.spec_diff_count,
+      false,
+      userLabel
+    ) + `\n\n🕒 報告產生時間：${rpt.created_at}`;
+
+    replyLineMessage(
+      lineToken,
+      replyToken,
+      summaryText,
+      userShops,
+      targetLiff,
+      null,
+      buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl, false)
+    );
+  } catch (err) {
+    replyLineMessage(lineToken, replyToken, `⚠️ 領取報告時發生異常：${err}`, userShops);
+  }
+}
+
+/**
+ * 取得使用者比對任務鎖定 (標記 is_running = 1，並重置件數與狀態)
  */
 function acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId) {
   if (!tursoUrl || !tursoToken || !userId) return;
@@ -1369,13 +1613,15 @@ function acquireUserQueryLock(tursoUrl, tursoToken, userId, platform, shopId) {
     const pipelineUrl = tursoUrl.replace("libsql://", "https://").replace(/\/$/, "") + "/v2/pipeline";
     const nowStr = Utilities.formatDate(new Date(), "GMT+8", "yyyy-MM-dd HH:mm:ss");
     const sql = `
-      INSERT INTO user_query_locks (user_id, is_running, platform, shop_id, locked_at)
-      VALUES (?, 1, ?, ?, ?)
+      INSERT INTO user_query_locks (user_id, is_running, platform, shop_id, locked_at, item_count, last_status)
+      VALUES (?, 1, ?, ?, ?, 0, '')
       ON CONFLICT(user_id) DO UPDATE SET
         is_running = 1,
         platform = excluded.platform,
         shop_id = excluded.shop_id,
-        locked_at = excluded.locked_at;
+        locked_at = excluded.locked_at,
+        item_count = 0,
+        last_status = '';
     `;
     const payload = {
       requests: [

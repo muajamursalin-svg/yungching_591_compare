@@ -206,6 +206,11 @@ def format_compare_summary(platform: str, shop_id: str, total: int, matched: int
     )
 
 def send_line_push_notification(user_id: str, message: str, liff_url: str = "", db_client: Optional[TursoClient] = None):
+    # 預設停用主動 Push 推播，統一由使用者點擊「領取最新報告」透過免費 Reply 領取
+    if os.environ.get("ENABLE_LINE_PUSH", "").lower() != "true":
+        print("[Notice] 已停用主動 Push 推播 (統一改用免費『領取最新報告』)，略過推播發送。")
+        return
+
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not token or not user_id:
         print("[Notice] 未設定 LINE_CHANNEL_ACCESS_TOKEN 或無 USER_ID，略過推播發送。")
@@ -233,18 +238,33 @@ def send_line_push_notification(user_id: str, message: str, liff_url: str = "", 
     except Exception as e:
         print(f"[Error] 發送 LINE 推播發生錯誤: {e}")
 
-def release_user_query_lock(db_client: TursoClient, user_id: str):
-    """解除使用者當前查詢併發鎖定"""
+def update_user_query_item_count(db_client: TursoClient, user_id: str, item_count: int):
+    """更新當前執行中任務的實際抓取物件數 (供排隊提示預估等待時間)"""
     if not db_client or not user_id:
         return
     try:
         db_client.execute(
-            "UPDATE user_query_locks SET is_running = 0 WHERE user_id = ?;",
-            [user_id]
+            "UPDATE user_query_locks SET item_count = ? WHERE user_id = ?;",
+            [int(item_count), user_id]
         )
-        print(f"🔓 [UserLock] 已成功釋放使用者 {user_id} 查詢鎖定。")
+    except Exception:
+        pass
+
+def release_user_query_lock(db_client: TursoClient, user_id: str, last_status: str = "SUCCESS"):
+    """解除使用者當前查詢併發鎖定並寫入最後狀態"""
+    if not db_client or not user_id:
+        return
+    try:
+        db_client.execute(
+            "UPDATE user_query_locks SET is_running = 0, last_status = ? WHERE user_id = ?;",
+            [last_status[:500], user_id]
+        )
+        print(f"🔓 [UserLock] 已成功釋放使用者 {user_id} 查詢鎖定 ({last_status[:40]})。")
     except Exception as e:
-        print(f"[Warn] 釋放使用者查詢鎖定失敗: {e}")
+        try:
+            db_client.execute("UPDATE user_query_locks SET is_running = 0 WHERE user_id = ?;", [user_id])
+        except Exception:
+            print(f"[Warn] 釋放使用者查詢鎖定失敗: {e}")
 
 def main():
     payload = {}
@@ -377,8 +397,10 @@ def main():
             err_msg = f"⚠️ 無法取得【{platform}】店鋪庫存資料（店鋪代號: {shop_id}）。\n\n可能原因：該店鋪目前無在售物件，或平台連線異常，請稍後再試。"
         print(f"[Warn] {err_msg}")
         send_line_push_notification(user_id, err_msg, db_client=db)
-        release_user_query_lock(db, user_id)
+        release_user_query_lock(db, user_id, last_status=f"ERROR:{err_msg}")
         return
+
+    update_user_query_item_count(db, user_id, len(std_houses))
 
     # 4. 執行通用特徵比對
     report_id = comparator.run_comparison(
@@ -449,7 +471,7 @@ if __name__ == "__main__":
                 )
                 if db_fallback:
                     try:
-                        release_user_query_lock(db_fallback, user_id)
+                        release_user_query_lock(db_fallback, user_id, last_status=f"ERROR:⚠️ 店鋪比對執行異常：{str(e)}")
                     except Exception:
                         pass
         except Exception as notify_err:
