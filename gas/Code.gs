@@ -22,7 +22,7 @@ function doGet(e) {
   try {
     const action = e.parameter.action;
     if (action === "ping") {
-      return ContentService.createTextOutput(JSON.stringify({ status: "ok", version: "2026-11-27-reply-report-v1" })).setMimeType(ContentService.MimeType.JSON);
+      return ContentService.createTextOutput(JSON.stringify({ status: "ok", version: "2026-11-27-query-status-v2" })).setMimeType(ContentService.MimeType.JSON);
     }
     const scriptProps = PropertiesService.getScriptProperties();
 
@@ -215,7 +215,7 @@ function doPost(e) {
             `📍 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
             (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
-            `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
+            `⏳ 比對作業處理中，請稍候約 30 秒，再點擊下方【🔍 查詢是否完成】按鈕查看進度與結果！`,
             null,
             null,
             [getLatestReportBtn()],
@@ -234,7 +234,7 @@ function doPost(e) {
               `⏳ 目前查詢中 請稍後\n\n` +
               `系統正為您處理【${platName}】店鋪比對。\n` +
               (queueMsg ? `${queueMsg}\n\n` : `\n`) +
-              `為確保資料正確性，一次僅能查詢一個平台，請稍候並點擊下方按鈕領取報告。`,
+              `為確保資料正確性，一次僅能查詢一個平台，請稍候並點擊下方【🔍 查詢是否完成】按鈕。`,
               null,
               null,
               [getLatestReportBtn()]
@@ -259,7 +259,7 @@ function doPost(e) {
             `📍 ${platform} 店鋪代號: ${shopId}\n` +
             `📈 個人累計查詢: 第 ${count} 次\n` +
             (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
-            `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
+            `⏳ 比對作業處理中，請稍候約 30 秒，再點擊下方【🔍 查詢是否完成】按鈕查看進度與結果！`,
             null,
             null,
             [getLatestReportBtn()],
@@ -288,7 +288,7 @@ function doPost(e) {
         // 0. 讀取使用者既有的店鋪儲存資訊
         let userShops = getUserSavedShops(tursoUrl, tursoToken, userId);
 
-        if (userMsg === "領取最新報告" || userMsg === "最新報告" || userMsg === "📥 領取最新報告" || userMsg === "領取報告") {
+        if (userMsg === "查詢是否完成" || userMsg === "🔍 查詢是否完成" || userMsg === "領取最新報告" || userMsg === "最新報告" || userMsg === "📥 領取最新報告" || userMsg === "領取報告") {
           handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, userId, liffUrl);
           continue;
         }
@@ -331,7 +331,7 @@ function doPost(e) {
               `⏳ 目前查詢中 請稍後\n\n` +
               `系統正為您處理【${platName} (${userLock.shop_id})】店鋪比對。\n` +
               (queueMsg ? `${queueMsg}\n\n` : `\n`) +
-              `完成後可點擊下方【📥 領取最新報告】查看結果！`,
+              `請稍候約 30 秒，點擊下方【🔍 查詢是否完成】查看最新進度！`,
               null,
               null,
               [getLatestReportBtn()]
@@ -387,7 +387,7 @@ function doPost(e) {
               `📍 店鋪代號: ${shopId}\n` +
               `📈 個人累計查詢: 第 ${newCnt} 次\n` +
               (queueMsg ? `\n${queueMsg}\n\n` : `\n`) +
-              `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
+              `⏳ 比對作業處理中，請稍候約 30 秒，再點擊下方【🔍 查詢是否完成】按鈕查看進度與結果！`,
               null,
               null,
               [getLatestReportBtn()],
@@ -436,7 +436,7 @@ function doPost(e) {
               `⏳ 目前查詢中 請稍後\n\n` +
               `系統正為您處理【${platName} (${userLock.shop_id})】店鋪比對。\n` +
               (queueMsg ? `${queueMsg}\n\n` : `\n`) +
-              `完成後可點擊下方【📥 領取最新報告】查看結果！`,
+              `請稍候約 30 秒，點擊下方【🔍 查詢是否完成】查看最新進度！`,
               null,
               null,
               [getLatestReportBtn()]
@@ -557,7 +557,7 @@ function doPost(e) {
               `📈 個人累計查詢: 第 ${currentCount} 次\n` +
               memoryTip +
               (queueMsg ? `${queueMsg}\n\n` : ``) +
-              `⏳ 處理完成後，請點擊下方【📥 領取最新報告】按鈕免費查看結果！`,
+              `⏳ 比對作業處理中，請稍候約 30 秒，再點擊下方【🔍 查詢是否完成】按鈕查看進度與結果！`,
               null,
               null,
               [getLatestReportBtn()],
@@ -842,9 +842,9 @@ function buildQuickReply(userShops) {
     type: "action",
     action: {
       type: "postback",
-      label: "📥 領取最新報告",
+      label: "🔍 查詢是否完成",
       data: "action=get_latest_report",
-      displayText: "領取最新報告"
+      displayText: "查詢是否完成"
     }
   });
   return { items: items };
@@ -1277,7 +1277,7 @@ function formatCompareSummaryText(platform, shopId, currentCount, total, matched
 /**
  * LINE Messaging API 回覆訊息 (全面支援 Flex 訊息卡片 + 實體按鈕 + 底部 Quick Reply + 額外附加訊息)
  */
-function replyLineMessage(token, replyToken, text, userShops, liffUrl, customButtons, extraMessages) {
+function replyLineMessage(token, replyToken, text, userShops, liffUrl, customButtons, extraMessages, prependMessages) {
   if (!token) return;
   const url = "https://api.line.me/v2/bot/message/reply";
 
@@ -1311,10 +1311,15 @@ function replyLineMessage(token, replyToken, text, userShops, liffUrl, customBut
   }
 
   const msgObj = buildInteractiveMessage(text, userShops, liffUrl, customButtons);
-  let messages = [msgObj];
-  if (Array.isArray(extraMessages) && extraMessages.length > 0) {
-    messages = messages.concat(extraMessages).slice(0, 5);
+  let messages = [];
+  if (Array.isArray(prependMessages) && prependMessages.length > 0) {
+    messages = messages.concat(prependMessages);
   }
+  messages.push(msgObj);
+  if (Array.isArray(extraMessages) && extraMessages.length > 0) {
+    messages = messages.concat(extraMessages);
+  }
+  messages = messages.slice(0, 5);
 
   const payload = {
     replyToken: replyToken,
@@ -1416,9 +1421,9 @@ function getLatestReportBtn() {
     color: "#06c755",
     action: {
       type: "postback",
-      label: "📥 領取最新報告",
+      label: "🔍 查詢是否完成",
       data: "action=get_latest_report",
-      displayText: "領取最新報告"
+      displayText: "查詢是否完成"
     }
   };
 }
@@ -1538,7 +1543,7 @@ function handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, user
           replyLineMessage(lineToken, replyToken,
             `⏳ 您的【${platName} (${lObj.shop_id})】比對作業仍在處理中！\n\n` +
             (queueMsg ? `${queueMsg}\n\n` : "") +
-            `請再稍候約 15~30 秒，再點擊下方按鈕領取結果：`,
+            `請稍候再點擊下方【🔍 查詢是否完成】按鈕查看最新進度：`,
             null,
             null,
             [getLatestReportBtn()]
@@ -1618,7 +1623,8 @@ function handleGetLatestReport(tursoUrl, tursoToken, lineToken, replyToken, user
       userShops,
       targetLiff,
       null,
-      buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl, false)
+      buildPromoExtraMessages(getTotalShopCount(userShops), liffUrl, false),
+      [{ type: "text", text: "📥 領取最新報告（比對已完成！）" }]
     );
   } catch (err) {
     replyLineMessage(lineToken, replyToken, `⚠️ 領取報告時發生異常：${err}`, userShops);
